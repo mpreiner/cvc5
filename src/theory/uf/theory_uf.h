@@ -118,7 +118,7 @@ private:
   /** The associated theory strong solver (or NULL if none) */
   StrongSolverTheoryUF* d_thss;
 
-  /** Equaltity engine */
+  /** Equality engine */
   eq::EqualityEngine d_equalityEngine;
 
   /** Are we in conflict */
