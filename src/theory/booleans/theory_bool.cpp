@@ -31,6 +31,29 @@ namespace CVC4 {
 namespace theory {
 namespace booleans {
 
+/** Utility to make a conjunction */
+static Node mkAnd(const std::vector<TNode>& conjunctions) {
+  Assert(conjunctions.size() > 0);
+
+  std::set<TNode> all;
+  all.insert(conjunctions.begin(), conjunctions.end());
+
+  if (all.size() == 1) {
+    // All the same, or just one
+    return conjunctions[0];
+  }
+
+  NodeBuilder<> conjunction(kind::AND);
+  std::set<TNode>::const_iterator it = all.begin();
+  std::set<TNode>::const_iterator it_end = all.end();
+  while (it != it_end) {
+    conjunction << *it;
+    ++ it;
+  }
+
+  return conjunction;
+}
+
 /**
  * Notification class for receiving notifications from the equality engine.
  */
@@ -40,7 +63,9 @@ class EqualityNotifyClass : public eq::EqualityEngineNotify {
 
 public:
 
-  EqualityNotifyClass(TheoryBool& theoryBool): d_theoryBool(theoryBool) {}
+  EqualityNotifyClass(TheoryBool& theoryBool)
+  : d_theoryBool(theoryBool)
+  {}
 
   bool eqNotifyTriggerEquality(TNode equality, bool value) {
     Debug("theory::bool") << "NotifyClass::eqNotifyTriggerEquality(" << equality << ", " << (value ? "true" : "false" )<< ")" << std::endl;
@@ -74,22 +99,20 @@ public:
     d_theoryBool.conflict(t1, t2);
   }
 
-  void eqNotifyDisequal(TNode t1, TNode t2, TNode reason) {
-    Debug("theory:bool") << "NotifyClass::eqNotifyDisequal(" << t1 << ", " << t2 << ", " << reason << std::endl;
-    d_theoryBool.eqNotifyDisequal(t1, t2, reason);
-  }
 
   // UNUSED STUFF
 
   void eqNotifyNewClass(TNode t) {};
   void eqNotifyPreMerge(TNode t1, TNode t2) {};
   void eqNotifyPostMerge(TNode t1, TNode t2) {};
+  void eqNotifyDisequal(TNode t1, TNode t2, TNode reason) {}
 };
 
 TheoryBool::TheoryBool(context::Context* c, context::UserContext* u, OutputChannel& out, Valuation valuation, const LogicInfo& logicInfo)
 : Theory(THEORY_BOOL, c, u, out, valuation, logicInfo)
 , d_equalityNotify(new EqualityNotifyClass(*this))
 , d_equalityEngine(*d_equalityNotify, c, "theory::TheoryBool", false)
+, d_conflict(c, false)
 {
 }
 
@@ -123,49 +146,126 @@ Theory::PPAssertStatus TheoryBool::ppAssert(TNode in, SubstitutionMap& outSubsti
 }
 
 void TheoryBool::setMasterEqualityEngine(eq::EqualityEngine* eq) {
-
+  d_equalityEngine.setMasterEqualityEngine(eq);
 }
 
 void TheoryBool::propagate(Effort effort) {
-
+  Debug("theory::bool") << "TheoryBool::propagate(" << effort << ")" << std::endl;
+  // Nothing to do, all in check
 }
 
-void TheoryBool::check(Effort) {
+void TheoryBool::check(Effort effort) {
+  Debug("theory::bool") << "TheoryBool::check(" << effort << ")" << std::endl;
 
+  if (done() && !fullEffort(effort)) {
+    return;
+  }
+
+  while (!done() && !d_conflict)
+  {
+    // Get the next assertions
+    Assertion assertion = get();
+    TNode fact = assertion.assertion;
+
+    Debug("theroy::bool") << "TheoryBool::check(): processing " << fact << std::endl;
+
+    // Do the work
+    bool polarity = fact.getKind() != kind::NOT;
+    TNode atom = polarity ? fact : fact[0];
+    if (atom.getKind() == kind::EQUAL) {
+      d_equalityEngine.assertEquality(atom, polarity, fact);
+    } else {
+      d_equalityEngine.assertPredicate(atom, polarity, fact);
+    }
+  }
+
+  // If in full effort, check the number of classes (max 2)
+  if (!d_conflict && fullEffort(effort)) {
+  }
 }
 
-Node TheoryBool::explain(TNode n) {
-  return n;
+Node TheoryBool::explain(TNode literal) {
+  Debug("theory::bool") << "TheoryBool::explain(" << literal << ")" << std::endl;
+  std::vector<TNode> assumptions;
+  explain(literal, assumptions);
+  return mkAnd(assumptions);
+}
+
+void TheoryBool::explain(TNode literal, std::vector<TNode>& assumptions) {
+  Debug("theory::bool") << "TheoryBool::explain(" << literal << ")" << std::endl;
+
+  // Do the work
+  bool polarity = literal.getKind() != kind::NOT;
+  TNode atom = polarity ? literal : literal[0];
+  eq::EqProof* eqProof = d_proofEnabled ? new eq::EqProof : NULL;
+  if (atom.getKind() == kind::EQUAL) {
+    d_equalityEngine.explainEquality(atom[0], atom[1], polarity, assumptions, eqProof);
+  } else {
+    d_equalityEngine.explainPredicate(atom, polarity, assumptions, eqProof);
+  }
 }
 
 void TheoryBool::preRegisterTerm(TNode term) {
-
+  Debug("theory::bool") << "TheoryBool::preRegisterTerm(" << term << ")" << std::endl;
+  switch (term.getKind()) {
+  case kind::EQUAL:
+    // Add the trigger for equality
+    d_equalityEngine.addTriggerEquality(term);
+    break;
+  default:
+    // Variables etc
+    d_equalityEngine.addTerm(term);
+    break;
+  }
 }
 
-void TheoryBool::addSharedTerm(TNode n) {
-
+void TheoryBool::addSharedTerm(TNode term) {
+  Debug("theory::bool") << "TheoryBool::addSharedTerm(" << term << ")" << std::endl;
+  d_equalityEngine.addTriggerTerm(term, THEORY_BOOL);
 }
 
 void TheoryBool::collectModelInfo(TheoryModel* m, bool fullModel) {
-
+  Debug("theory::bool") << "TheoryBool::collectModelInfo()" << std::endl;
 }
 
-EqualityStatus TheoryBool::getEqualityStatus(TNode a, TNode b) {
+EqualityStatus TheoryBool::getEqualityStatus(TNode t1, TNode t2) {
+  Debug("theory::bool") << "TheoryBool::propagate(" << t1 << ", " << t2 << ")" << std::endl;
+
+  // Check for equality (simplest)
+  if (d_equalityEngine.areEqual(t1, t2)) {
+    // The terms are implied to be equal
+    return EQUALITY_TRUE;
+  }
+
+  // Check for disequality
+  if (d_equalityEngine.areDisequal(t1, t2, false)) {
+    // The terms are implied to be dis-equal
+    return EQUALITY_FALSE;
+  }
+
   return EQUALITY_UNKNOWN;
 }
 
 bool TheoryBool::propagate(TNode literal) {
-  return true;
+  Debug("theory::bool") << "TheoryBool::propagate(" << literal << ")" << std::endl;
+  if (d_conflict) {
+    // If already in conflict, no more propagation
+    return false;
+  }
+  // Propagate out
+  bool ok = d_out->propagate(literal);
+  if (!ok) {
+    d_conflict = true;
+  }
+  return ok;
 }
 
-void TheoryBool::conflict(TNode a, TNode b) {
-
+void TheoryBool::conflict(TNode t1, TNode t2) {
+  Debug("theory::bool") << "TheoryBool::conflict(" << t1 << ", " << t2 << ")" << std::endl;
+  d_conflictTerm = explain(t1.eqNode(t2));
+  d_out->conflict(d_conflictTerm);
+  d_conflict = true;
 }
-
-void TheoryBool::eqNotifyDisequal(TNode t1, TNode t2, TNode reason) {
-
-}
-
 
 }/* CVC4::theory::booleans namespace */
 }/* CVC4::theory namespace */

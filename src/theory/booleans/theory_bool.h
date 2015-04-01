@@ -44,10 +44,16 @@ class TheoryBool : public Theory {
   /** Called on conflict when merging two constants */
   void conflict(TNode a, TNode b);
 
-  /** Called when two equivalence classes are made disequal */
-  void eqNotifyDisequal(TNode t1, TNode t2, TNode reason);
+  /** Explain why this literal is true by adding assumptions */
+  void explain(TNode literal, std::vector<TNode>& assumptions);
 
   friend class EqualityNotifyClass;
+
+  /** Are we in conflict */
+  context::CDO<bool> d_conflict;
+
+  /** The conflict term */
+  Node d_conflictTerm;
 
 public:
 
@@ -56,12 +62,12 @@ public:
 
   void setMasterEqualityEngine(eq::EqualityEngine* eq);
   void propagate(Effort effort);
-  void check(Effort);
-  Node explain(TNode n);
+  void check(Effort effort);
+  Node explain(TNode literal);
   void preRegisterTerm(TNode term);
-  void addSharedTerm(TNode n);
+  void addSharedTerm(TNode term);
   void collectModelInfo(TheoryModel* m, bool fullModel);
-  EqualityStatus getEqualityStatus(TNode a, TNode b);
+  EqualityStatus getEqualityStatus(TNode t1, TNode t2);
 
   PPAssertStatus ppAssert(TNode in, SubstitutionMap& outSubstitutions);
 
