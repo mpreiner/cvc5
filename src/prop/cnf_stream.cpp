@@ -478,14 +478,6 @@ SatLiteral TseitinCnfStream::toCNF(TNode node, bool negated) {
     case AND:
       nodeLit = handleAnd(node);
       break;
-    case EQUAL:
-      if(node[0].getType().isBoolean()) {
-        // normally this is an IFF, but EQUAL is possible with pseudobooleans
-        nodeLit = handleIff(node);
-      } else {
-        nodeLit = convertAtom(node);
-      }
-      break;
     default:
       {
         //TODO make sure this does not contain any boolean substructure
@@ -577,36 +569,6 @@ void TseitinCnfStream::convertAndAssertXor(TNode node, bool negated) {
   }
 }
 
-void TseitinCnfStream::convertAndAssertIff(TNode node, bool negated) {
-  if (!negated) {
-    // p <=> q
-    SatLiteral p = toCNF(node[0], false);
-    SatLiteral q = toCNF(node[1], false);
-    // Construct the clauses (p => q) and (q => p)
-    SatClause clause1(2);
-    clause1[0] = ~p;
-    clause1[1] = q;
-    assertClause(node, clause1);
-    SatClause clause2(2);
-    clause2[0] = p;
-    clause2[1] = ~q;
-    assertClause(node, clause2);
-  } else {
-    // !(p <=> q) is the same as p XOR q
-    SatLiteral p = toCNF(node[0], false);
-    SatLiteral q = toCNF(node[1], false);
-    // Construct the clauses (p => !q) and (!q => p)
-    SatClause clause1(2);
-    clause1[0] = ~p;
-    clause1[1] = ~q;
-    assertClause(node, clause1);
-    SatClause clause2(2);
-    clause2[0] = p;
-    clause2[1] = q;
-    assertClause(node, clause2);
-  }
-}
-
 void TseitinCnfStream::convertAndAssertImplies(TNode node, bool negated) {
   if (!negated) {
     // p => q
@@ -689,11 +651,6 @@ void TseitinCnfStream::convertAndAssert(TNode node, bool negated) {
   case NOT:
     convertAndAssert(node[0], !negated);
     break;
-  case EQUAL:
-    if( node[0].getType().isBoolean() ){
-      convertAndAssertIff(node, negated);
-      break;
-    }
   default:
     // Atoms
     assertClause(node, toCNF(node, negated));

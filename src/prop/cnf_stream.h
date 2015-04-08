@@ -321,7 +321,6 @@ private:
   void convertAndAssertAnd(TNode node, bool negated);
   void convertAndAssertOr(TNode node, bool negated);
   void convertAndAssertXor(TNode node, bool negated);
-  void convertAndAssertIff(TNode node, bool negated);
   void convertAndAssertImplies(TNode node, bool negated);
   void convertAndAssertIte(TNode node, bool negated);
 

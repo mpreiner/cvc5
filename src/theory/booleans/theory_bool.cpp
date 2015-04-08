@@ -167,7 +167,7 @@ void TheoryBool::check(Effort effort) {
     Assertion assertion = get();
     TNode fact = assertion.assertion;
 
-    Debug("theroy::bool") << "TheoryBool::check(): processing " << fact << std::endl;
+    Debug("theory::bool") << "TheoryBool::check(): processing " << fact << std::endl;
 
     // Do the work
     bool polarity = fact.getKind() != kind::NOT;
@@ -181,6 +181,16 @@ void TheoryBool::check(Effort effort) {
 
   // If in full effort, check the number of classes (max 2)
   if (!d_conflict && fullEffort(effort)) {
+    // Each class should be either true or false
+    eq::EqClassesIterator class_iterator(&d_equalityEngine);
+    while (!class_iterator.isFinished()) {
+      TNode class_rep = *class_iterator;
+      if (!class_rep.isConst()) {
+        Debug("theory::bool") << "TheoryBool::check(): splitting on " << class_rep << std::endl;
+        d_out->split(class_rep);
+      }
+      ++ class_iterator;
+    }
   }
 }
 

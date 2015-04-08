@@ -224,7 +224,6 @@ void TheoryEngine::preRegister(TNode preprocessed) {
 
       // Pre-register the terms in the atom
       Theory::Set theories = NodeVisitor<PreRegisterVisitor>::run(d_preRegistrationVisitor, preprocessed);
-      theories = Theory::setRemove(THEORY_BOOL, theories);
       // Remove the top theory, if any more that means multiple theories were involved
       bool multipleTheories = Theory::setRemove(Theory::theoryOf(preprocessed), theories);
       TheoryId i;

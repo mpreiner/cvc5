@@ -63,7 +63,6 @@ class CVC4_PUBLIC LogicInfo {
   static inline bool isTrueTheory(theory::TheoryId theory) {
     switch(theory) {
     case theory::THEORY_BUILTIN:
-    case theory::THEORY_BOOL:
     case theory::THEORY_QUANTIFIERS:
       return false;
     default:
