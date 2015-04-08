@@ -1408,7 +1408,7 @@ void EqualityEngine::propagate() {
         if (triggerInfo.trigger.getKind() == kind::EQUAL) {
           // Special treatment for disequalities
           if (!triggerInfo.polarity) {
-            // Store that we are propagating a diseauality
+            // Store that we are propagating a disequality
             TNode equality = triggerInfo.trigger;
             EqualityNodeId original = getNodeId(equality);
             TNode lhs = equality[0];
@@ -1551,7 +1551,7 @@ void EqualityEngine::addTriggerTerm(TNode t, TheoryId tag)
   Debug("equality::trigger") << d_name << "::eq::addTriggerTerm(" << t << ", " << tag << ")" << std::endl;
 
   Assert(tag != THEORY_LAST);
-  // Assert(tag != THEORY_BOOL, "This one is used internally, bummer");
+  Assert(tag != THEORY_BOOL, "This one is used internally, bummer");
 
   if (d_done) {
     return;
