@@ -142,56 +142,27 @@ void TheoryUF::check(Effort level) {
   if(! d_conflict ){
     if( Theory::fullEffort(level) ){
       //Boolean terms
-      std::map< Node, bool > sat_values;
-      do{
-        sat_values.clear();
-        eq::EqualityEngine* ee = getEqualityEngine();
-        eq::EqClassesIterator eqcs_i = eq::EqClassesIterator( ee );
-        while( !eqcs_i.isFinished() ){
-          TNode r = (*eqcs_i);
-          
-          if( r.getType().isBoolean() && r.getKind()==kind::BOOLEAN_VARIABLE ){ //&& r.isVar() ){
-            Assert( !d_proofsEnabled );
-            bool value;
-            if( d_valuation.hasSatValue(r, value) ){
-              Assert( false );
-              //Trace("uf-bt") << r << " has a SAT value : " << value << std::endl;
-              //sat_values[r] = value;
-            }else{
-              //split
-              Node lem = NodeManager::currentNM()->mkNode( kind::OR, r, r.negate() );
-              Trace("uf-bt") << "**** lemma (?) : " << lem << std::endl;
-              d_out->lemma(lem);
-            }
-          }
-          
-          bool firstTime = true;
-          Trace("uf-bt") << "  " << r;
-          Trace("uf-bt") << " : { ";
-          eq::EqClassIterator eqc_i = eq::EqClassIterator( r, ee );
-          while( !eqc_i.isFinished() ){
-            TNode n = (*eqc_i);
-            if( r!=n ){
-              if( firstTime ){
-                Trace("uf-bt") << std::endl;
-                firstTime = false;
-              }
-              Trace("uf-bt") << "    " << n << std::endl;
-            }
-            ++eqc_i;
-          }
-          if( !firstTime ){ Trace("uf-bt") << "  "; }
-          Trace("uf-bt") << "}" << std::endl;
-          ++eqcs_i;
-        }
-        for( std::map< Node, bool >::iterator its = sat_values.begin(); its != sat_values.end(); ++its ){
-          Trace("uf-bt") << "Assert : " << its->first << ", polarity = " << its->second << std::endl;
-          d_equalityEngine.assertPredicate(its->first, its->second, its->second ? its->first : its->first.negate());
-          if( d_conflict ){
-            break;
+      eq::EqualityEngine* ee = getEqualityEngine();
+      eq::EqClassesIterator eqcs_i = eq::EqClassesIterator( ee );
+      while( !eqcs_i.isFinished() ){
+        TNode r = (*eqcs_i);
+        
+        if( r.getType().isBoolean() && r.getKind()==kind::BOOLEAN_VARIABLE ){ //&& r.isVar() ){
+          Assert( !d_proofsEnabled );
+          bool value;
+          if( d_valuation.hasSatValue(r, value) ){
+            Assert( false );
+            //Trace("uf-bt") << r << " has a SAT value : " << value << std::endl;
+            //sat_values[r] = value;
+          }else{
+            //split
+            Node lem = NodeManager::currentNM()->mkNode( kind::OR, r, r.negate() );
+            Trace("uf-bt") << "**** lemma (?) : " << lem << std::endl;
+            d_out->lemma(lem);
           }
         }
-      }while( !sat_values.empty() && !d_conflict );
+        ++eqcs_i;
+      }
     }
     if(! d_conflict ){
       if (d_thss != NULL) {
