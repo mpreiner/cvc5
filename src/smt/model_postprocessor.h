@@ -24,6 +24,7 @@
 namespace CVC4 {
 namespace smt {
 
+/*
 class ModelPostprocessor {
   std::hash_map<TNode, Node, TNodeHashFunction> d_nodes;
 
@@ -45,7 +46,9 @@ public:
     TNode retval = d_nodes[n];
     return retval.isNull() ? n : retval;
   }
-};/* class ModelPostprocessor */
+};/
+*/
+/* class ModelPostprocessor */
 
 }/* CVC4::smt namespace */
 }/* CVC4 namespace */

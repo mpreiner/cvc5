@@ -34,6 +34,9 @@ namespace theory {
 
 /** Default value for the uninterpreted sorts is the UF theory */
 TheoryId Theory::s_uninterpretedSortOwner = THEORY_UF;
+//--AJR
+TheoryId Theory::s_booleanSortOwner = THEORY_BOOL;
+//--AJR-end
 
 std::ostream& operator<<(std::ostream& os, Theory::Effort level){
   switch(level){
@@ -88,7 +91,15 @@ TheoryId Theory::theoryOf(TheoryOfMode mode, TNode node) {
   switch(mode) {
   case THEORY_OF_TYPE_BASED:
     // Constants, variables, 0-ary constructors
-    if (node.isVar() || node.isConst()) {
+    if (node.isVar()) {
+      tid = Theory::theoryOf(node.getType());
+      //--AJR
+      if( node.getKind() == kind::BOOLEAN_VARIABLE ){
+        tid = THEORY_UF;
+        Trace("ajr-temp") << "theoryOf " << node << " -> " << tid << std::endl;
+      }
+      //--AJR-end
+    }else if (node.isConst()) {
       tid = Theory::theoryOf(node.getType());
     } else if (node.getKind() == kind::EQUAL) {
       // Equality is owned by the theory that owns the domain
@@ -105,8 +116,15 @@ TheoryId Theory::theoryOf(TheoryOfMode mode, TNode node) {
         // We treat the variables as uninterpreted
         tid = s_uninterpretedSortOwner;
       } else {
-        // Except for the Boolean ones, which we just ignore anyhow
-        tid = theory::THEORY_BOOL;
+        if( node.getKind() == kind::BOOLEAN_VARIABLE ){
+          //--AJR
+          tid = s_uninterpretedSortOwner;
+          Trace("ajr-temp") << "theoryOf " << node << " -> " << tid << std::endl;
+          //--AJR-end
+        }else{
+          // Except for the Boolean ones
+          tid = s_booleanSortOwner;
+        }
       }
     } else if (node.isConst()) {
       // Constants go to the theory of the type
@@ -408,7 +426,7 @@ bool ExtTheory::doInferencesInternal( int effort, std::vector< Node >& terms, st
           nred.push_back( n );
         }else{
           if( !nr.isNull() && n!=nr ){
-            Node lem = NodeManager::currentNM()->mkNode( n.getType().isBoolean() ? kind::IFF : kind::EQUAL, n, nr );
+            Node lem = NodeManager::currentNM()->mkNode( kind::EQUAL, n, nr );
             if( sendLemma( lem, true ) ){
               Trace("extt-lemma") << "ExtTheory : Reduction lemma : " << lem << std::endl;
               addedLemma = true;

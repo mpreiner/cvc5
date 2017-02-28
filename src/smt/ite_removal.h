@@ -36,10 +36,10 @@ namespace theory {
 typedef std::hash_map<Node, unsigned, NodeHashFunction> IteSkolemMap;
 
 class RemoveITE {
-  typedef context::CDInsertHashMap< std::pair<Node, bool>, Node, PairHashFunction<Node, bool, NodeHashFunction, BoolHashFunction> > ITECache;
+  typedef context::CDInsertHashMap< std::pair<Node, int>, Node, PairHashFunction<Node, int, NodeHashFunction, BoolHashFunction> > ITECache;
   ITECache d_iteCache;
 
-
+  static inline int cacheVal( bool inQuant, bool inTerm ) { return (inQuant ? 1 : 0) + 2*(inTerm ? 1 : 0); }
 public:
 
   RemoveITE(context::UserContext* u);
@@ -65,13 +65,13 @@ public:
    * ite created in conjunction with that skolem variable.
    */
   Node run(TNode node, std::vector<Node>& additionalAssertions,
-           IteSkolemMap& iteSkolemMap, bool inQuant);
+           IteSkolemMap& iteSkolemMap, bool inQuant, bool inTerm);
 
   /**
    * Substitute under node using pre-existing cache.  Do not remove
    * any ITEs not seen during previous runs.
    */
-  Node replace(TNode node, bool inQuant = false) const;
+  Node replace(TNode node, bool inQuant = false, bool inTerm = false) const;
 
   /** Returns true if e contains a term ite. */
   bool containsTermITE(TNode e) const;

@@ -24,13 +24,14 @@ constant CONST_BOOLEAN \
     "util/bool.h" \
     "truth and falsity; payload is a (C++) bool"
 
+variable BOOLEAN_VARIABLE "boolean variable"
+
 enumerator BOOLEAN_TYPE \
     "::CVC4::theory::booleans::BooleanEnumerator" \
     "theory/booleans/type_enumerator.h"
 
 operator NOT 1 "logical not"
 operator AND 2: "logical and (N-ary)"
-operator IFF 2 "logical equivalence (exactly two parameters)"
 operator IMPLIES 2 "logical implication (exactly two parameters)"
 operator OR 2: "logical or (N-ary)"
 operator XOR 2 "exclusive or (exactly two parameters)"
@@ -40,7 +41,6 @@ typerule CONST_BOOLEAN ::CVC4::theory::boolean::BooleanTypeRule
 
 typerule NOT ::CVC4::theory::boolean::BooleanTypeRule
 typerule AND ::CVC4::theory::boolean::BooleanTypeRule
-typerule IFF ::CVC4::theory::boolean::BooleanTypeRule
 typerule IMPLIES ::CVC4::theory::boolean::BooleanTypeRule
 typerule OR ::CVC4::theory::boolean::BooleanTypeRule
 typerule XOR ::CVC4::theory::boolean::BooleanTypeRule

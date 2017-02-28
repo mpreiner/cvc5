@@ -329,7 +329,7 @@ void EqualityEngine::addTermInternal(TNode t, bool isOperator) {
     d_isConstant[result] = !isOperator && t.isConst();
   }
 
-  if (t.getType().isBoolean()) {
+  if (t.getType().isBoolean() && !t.isVar() && !t.isConst()) {
     // We set this here as this only applies to actual terms, not the
     // intermediate application terms
     d_isBoolean[result] = true;
@@ -1268,7 +1268,7 @@ void EqualityEngine::getExplanation(EqualityNodeId t1Id, EqualityNodeId t2Id, st
             } else {
               eqp->d_id = MERGED_THROUGH_TRANS;
               eqp->d_children.insert( eqp->d_children.end(), eqp_trans.begin(), eqp_trans.end() );
-              eqp->d_node = NodeManager::currentNM()->mkNode(d_nodes[t1Id].getType().isBoolean() ? kind::IFF : kind::EQUAL, d_nodes[t1Id], d_nodes[t2Id]);
+              eqp->d_node = NodeManager::currentNM()->mkNode(kind::EQUAL, d_nodes[t1Id], d_nodes[t2Id]);
             }
 
             eqp->debug_print("pf::ee", 1);

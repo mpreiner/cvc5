@@ -139,14 +139,69 @@ void TheoryUF::check(Effort level) {
     }
   }
 
-
-  if (d_thss != NULL && ! d_conflict) {
-    d_thss->check(level);
-    if( d_thss->isConflict() ){
-      d_conflict = true;
+  if(! d_conflict ){
+    if( Theory::fullEffort(level) ){
+      //Boolean terms
+      std::map< Node, bool > sat_values;
+      do{
+        sat_values.clear();
+        eq::EqualityEngine* ee = getEqualityEngine();
+        eq::EqClassesIterator eqcs_i = eq::EqClassesIterator( ee );
+        while( !eqcs_i.isFinished() ){
+          TNode r = (*eqcs_i);
+          
+          if( r.getType().isBoolean() && r.getKind()==kind::BOOLEAN_VARIABLE ){ //&& r.isVar() ){
+            Assert( !d_proofsEnabled );
+            bool value;
+            if( d_valuation.hasSatValue(r, value) ){
+              Assert( false );
+              //Trace("uf-bt") << r << " has a SAT value : " << value << std::endl;
+              //sat_values[r] = value;
+            }else{
+              //split
+              Node lem = NodeManager::currentNM()->mkNode( kind::OR, r, r.negate() );
+              Trace("uf-bt") << "**** lemma (?) : " << lem << std::endl;
+              d_out->lemma(lem);
+            }
+          }
+          
+          bool firstTime = true;
+          Trace("uf-bt") << "  " << r;
+          Trace("uf-bt") << " : { ";
+          eq::EqClassIterator eqc_i = eq::EqClassIterator( r, ee );
+          while( !eqc_i.isFinished() ){
+            TNode n = (*eqc_i);
+            if( r!=n ){
+              if( firstTime ){
+                Trace("uf-bt") << std::endl;
+                firstTime = false;
+              }
+              Trace("uf-bt") << "    " << n << std::endl;
+            }
+            ++eqc_i;
+          }
+          if( !firstTime ){ Trace("uf-bt") << "  "; }
+          Trace("uf-bt") << "}" << std::endl;
+          ++eqcs_i;
+        }
+        for( std::map< Node, bool >::iterator its = sat_values.begin(); its != sat_values.end(); ++its ){
+          Trace("uf-bt") << "Assert : " << its->first << ", polarity = " << its->second << std::endl;
+          d_equalityEngine.assertPredicate(its->first, its->second, its->second ? its->first : its->first.negate());
+          if( d_conflict ){
+            break;
+          }
+        }
+      }while( !sat_values.empty() && !d_conflict );
+    }
+    if(! d_conflict ){
+      if (d_thss != NULL) {
+        d_thss->check(level);
+        if( d_thss->isConflict() ){
+          d_conflict = true;
+        }
+      }
     }
   }
-
 }/* TheoryUF::check() */
 
 void TheoryUF::preRegisterTerm(TNode node) {
@@ -217,7 +272,7 @@ void TheoryUF::explain(TNode literal, std::vector<TNode>& assumptions, eq::EqPro
   // Do the work
   bool polarity = literal.getKind() != kind::NOT;
   TNode atom = polarity ? literal : literal[0];
-  if (atom.getKind() == kind::EQUAL || atom.getKind() == kind::IFF) {
+  if (atom.getKind() == kind::EQUAL) {
     d_equalityEngine.explainEquality(atom[0], atom[1], polarity, assumptions, pf);
   } else {
     d_equalityEngine.explainPredicate(atom, polarity, assumptions, pf);
@@ -336,10 +391,10 @@ void TheoryUF::ppStaticLearn(TNode n, NodeBuilder<>& learned) {
     if(n.getKind() == kind::OR && n.getNumChildren() == 2 &&
        n[0].getKind() == kind::AND && n[0].getNumChildren() == 2 &&
        n[1].getKind() == kind::AND && n[1].getNumChildren() == 2 &&
-       (n[0][0].getKind() == kind::EQUAL || n[0][0].getKind() == kind::IFF) &&
-       (n[0][1].getKind() == kind::EQUAL || n[0][1].getKind() == kind::IFF) &&
-       (n[1][0].getKind() == kind::EQUAL || n[1][0].getKind() == kind::IFF) &&
-       (n[1][1].getKind() == kind::EQUAL || n[1][1].getKind() == kind::IFF)) {
+       (n[0][0].getKind() == kind::EQUAL) &&
+       (n[0][1].getKind() == kind::EQUAL) &&
+       (n[1][0].getKind() == kind::EQUAL) &&
+       (n[1][1].getKind() == kind::EQUAL)) {
       // now we have (a = b && c = d) || (e = f && g = h)
 
       Debug("diamonds") << "has form of a diamond!" << endl;
@@ -396,7 +451,7 @@ void TheoryUF::ppStaticLearn(TNode n, NodeBuilder<>& learned) {
           (a == h && d == e) ) {
         // learn: n implies a == d
         Debug("diamonds") << "+ C holds" << endl;
-        Node newEquality = a.getType().isBoolean() ? a.iffNode(d) : a.eqNode(d);
+        Node newEquality = a.eqNode(d);
         Debug("diamonds") << "  ==> " << newEquality << endl;
         learned << n.impNode(newEquality);
       } else {
@@ -533,12 +588,7 @@ void TheoryUF::computeCareGraph() {
 
 void TheoryUF::conflict(TNode a, TNode b) {
   eq::EqProof* pf = d_proofsEnabled ? new eq::EqProof() : NULL;
-
-  if (a.getKind() == kind::CONST_BOOLEAN) {
-    d_conflictNode = explain(a.iffNode(b),pf);
-  } else {
-    d_conflictNode = explain(a.eqNode(b),pf);
-  }
+  d_conflictNode = explain(a.eqNode(b),pf);
   ProofUF* puf = d_proofsEnabled ? new ProofUF( pf ) : NULL;
   d_out->conflict(d_conflictNode, puf);
   d_conflict = true;

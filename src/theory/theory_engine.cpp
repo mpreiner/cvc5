@@ -121,13 +121,15 @@ void TheoryEngine::EngineOutputChannel::registerLemmaRecipe(Node lemma, Node ori
     }
     break;
 
-  case kind::IFF:
-    if (!negated) {
-      registerLemmaRecipe(nm->mkNode(kind::OR, nnLemma[0], nnLemma[1].negate()), originalLemma, false, theoryId);
-      registerLemmaRecipe(nm->mkNode(kind::OR, nnLemma[0].negate(), nnLemma[1]), originalLemma, false, theoryId);
-    } else {
-      registerLemmaRecipe(nm->mkNode(kind::OR, nnLemma[0], nnLemma[1]), originalLemma, false, theoryId);
-      registerLemmaRecipe(nm->mkNode(kind::OR, nnLemma[0].negate(), nnLemma[1].negate()), originalLemma, false, theoryId);
+  case kind::EQUAL:
+    if( nnLemma[0].getType().isBoolean() ){
+      if (!negated) {
+        registerLemmaRecipe(nm->mkNode(kind::OR, nnLemma[0], nnLemma[1].negate()), originalLemma, false, theoryId);
+        registerLemmaRecipe(nm->mkNode(kind::OR, nnLemma[0].negate(), nnLemma[1]), originalLemma, false, theoryId);
+      } else {
+        registerLemmaRecipe(nm->mkNode(kind::OR, nnLemma[0], nnLemma[1]), originalLemma, false, theoryId);
+        registerLemmaRecipe(nm->mkNode(kind::OR, nnLemma[0].negate(), nnLemma[1].negate()), originalLemma, false, theoryId);
+      }
     }
     break;
 
@@ -1754,8 +1756,10 @@ theory::LemmaStatus TheoryEngine::lemma(TNode node,
   Node ppNode = preprocess ? this->preprocess(node) : Node(node);
 
   // Remove the ITEs
+  Debug("ite") << "Remove ITE from " << ppNode << std::endl;
   additionalLemmas.push_back(ppNode);
   d_iteRemover.run(additionalLemmas, iteSkolemMap);
+  Debug("ite") << "..done " << additionalLemmas[0] << std::endl;
   additionalLemmas[0] = theory::Rewriter::rewrite(additionalLemmas[0]);
 
   if(Debug.isOn("lemma-ites")) {
@@ -2109,7 +2113,8 @@ void TheoryEngine::getExplanation(std::vector<NodeTheoryPair>& explanationVector
     }
 
     Debug("theory::explain") << "TheoryEngine::explain(): got explanation " << explanation << " got from " << toExplain.theory << endl;
-    Assert(explanation != toExplain.node, "wasn't sent to you, so why are you explaining it trivially");
+    //AJR : Boolean terms are not sent to theories but may appear in conflicts (FIXME)
+    Assert( explanation != toExplain.node, "wasn't sent to you, so why are you explaining it trivially");
     // Mark the explanation
     NodeTheoryPair newExplain(explanation, toExplain.theory, toExplain.timestamp);
     explanationVector.push_back(newExplain);

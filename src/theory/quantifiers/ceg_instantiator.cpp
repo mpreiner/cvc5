@@ -884,7 +884,7 @@ void CegInstantiator::collectCeAtoms( Node n, std::map< Node, bool >& visited ) 
     d_is_nested_quant = true;
   }else if( visited.find( n )==visited.end() ){
     visited[n] = true;
-    if( TermDb::isBoolConnective( n.getKind() ) ){
+    if( TermDb::isBoolConnectiveTerm( n ) ){
       for( unsigned i=0; i<n.getNumChildren(); i++ ){
         collectCeAtoms( n[i], visited );
       }
