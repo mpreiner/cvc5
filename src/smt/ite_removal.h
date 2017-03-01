@@ -35,15 +35,15 @@ namespace theory {
 
 typedef std::hash_map<Node, unsigned, NodeHashFunction> IteSkolemMap;
 
-class RemoveITE {
+class RemoveTermFormulas {
   typedef context::CDInsertHashMap< std::pair<Node, int>, Node, PairHashFunction<Node, int, NodeHashFunction, BoolHashFunction> > ITECache;
   ITECache d_iteCache;
 
   static inline int cacheVal( bool inQuant, bool inTerm ) { return (inQuant ? 1 : 0) + 2*(inTerm ? 1 : 0); }
 public:
 
-  RemoveITE(context::UserContext* u);
-  ~RemoveITE();
+  RemoveTermFormulas(context::UserContext* u);
+  ~RemoveTermFormulas();
 
   /**
    * Removes the ITE nodes by introducing skolem variables. All
@@ -82,7 +82,7 @@ public:
   /** Garbage collects non-context dependent data-structures. */
   void garbageCollect();
 
-  /** Return the RemoveITE's containsVisitor. */
+  /** Return the RemoveTermFormulas's containsVisitor. */
   theory::ContainsTermITEVisitor* getContainsVisitor();
 
 private:

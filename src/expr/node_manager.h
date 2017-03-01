@@ -529,8 +529,8 @@ public:
   /** Create a instantiation constant with the given type. */
   Node mkInstConstant(const TypeNode& type);
   
-  /** Create a boolean variable. */
-  Node mkBooleanVariable();
+  /** Create a boolean term variable. */
+  Node mkBooleanTermVariable();
 
   /** Make a new abstract value with the given type. */
   Node mkAbstractValue(const TypeNode& type);

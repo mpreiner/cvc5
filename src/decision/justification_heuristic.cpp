@@ -450,7 +450,7 @@ JustificationHeuristic::findSplitterRec(TNode node, SatValue desiredVal)
   Kind k = node.getKind();
   theory::TheoryId tId = theory::kindToTheoryId(k);
   bool isAtom =
-     (k == kind::BOOLEAN_VARIABLE ) ||
+     (k == kind::BOOLEAN_TERM_VARIABLE ) ||
      ( (tId != theory::THEORY_BOOL) &&
        (k != kind::EQUAL || (!node[0].getType().isBoolean())) );
 

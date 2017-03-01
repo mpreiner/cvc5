@@ -24,8 +24,6 @@ constant CONST_BOOLEAN \
     "util/bool.h" \
     "truth and falsity; payload is a (C++) bool"
 
-variable BOOLEAN_VARIABLE "boolean variable"
-
 enumerator BOOLEAN_TYPE \
     "::CVC4::theory::booleans::BooleanEnumerator" \
     "theory/booleans/type_enumerator.h"

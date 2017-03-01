@@ -753,7 +753,7 @@ void CegInstantiator::processAssertions() {
               Trace("cbqi-proc") << "......add substitution : " << itae2->first << " -> " << itae2->second << std::endl;
             }
           }
-        }else if( atom.getKind()==BOOLEAN_VARIABLE ){
+        }else if( atom.getKind()==BOOLEAN_TERM_VARIABLE ){
           if( std::find( d_aux_vars.begin(), d_aux_vars.end(), atom )!=d_aux_vars.end() ){
             Node val = NodeManager::currentNM()->mkConst( lit.getKind()!=NOT );
             aux_subs[ atom ] = val;
@@ -946,7 +946,7 @@ void CegInstantiator::registerCounterexampleLemma( std::vector< Node >& lems, st
 
   //remove ITEs
   IteSkolemMap iteSkolemMap;
-  d_qe->getTheoryEngine()->getIteRemover()->run(lems, iteSkolemMap);
+  d_qe->getTheoryEngine()->getTermFormulaRemover()->run(lems, iteSkolemMap);
   //Assert( d_aux_vars.empty() );
   d_aux_vars.clear();
   d_aux_eq.clear();

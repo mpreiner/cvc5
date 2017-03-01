@@ -242,7 +242,7 @@ SatLiteral CnfStream::convertAtom(TNode node, bool noPreregistration) {
   bool preRegister = false;
 
   // Is this a variable add it to the list
-  if (node.isVar() && node.getKind()!=BOOLEAN_VARIABLE) {
+  if (node.isVar() && node.getKind()!=BOOLEAN_TERM_VARIABLE) {
     d_booleanVariables.push_back(node);
   } else {
     theoryLiteral = true;

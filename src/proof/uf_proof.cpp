@@ -705,7 +705,7 @@ void LFSCUFProof::printOwnedTerm(Expr term, std::ostream& os, const ProofLetMap&
     os << term;
     return;
   }
-  if (term.getKind() == kind::BOOLEAN_VARIABLE) {
+  if (term.getKind() == kind::BOOLEAN_TERM_VARIABLE) {
     os << "(p_app " << term << ")";
     return;
   }

@@ -268,7 +268,7 @@ void TheoryEngine::eqNotifyDisequal(TNode t1, TNode t2, TNode reason){
 
 TheoryEngine::TheoryEngine(context::Context* context,
                            context::UserContext* userContext,
-                           RemoveITE& iteRemover,
+                           RemoveTermFormulas& iteRemover,
                            const LogicInfo& logicInfo,
                            LemmaChannels* channels)
 : d_propEngine(NULL),
@@ -294,7 +294,7 @@ TheoryEngine::TheoryEngine(context::Context* context,
   d_propagatedLiterals(context),
   d_propagatedLiteralsIndex(context, 0),
   d_atomRequests(context),
-  d_iteRemover(iteRemover),
+  d_tform_remover(iteRemover),
   d_combineTheoriesTime("TheoryEngine::combineTheoriesTime"),
   d_true(),
   d_false(),
@@ -329,7 +329,7 @@ TheoryEngine::TheoryEngine(context::Context* context,
   ProofManager::currentPM()->initTheoryProofEngine();
 #endif
 
-  d_iteUtilities = new ITEUtilities(d_iteRemover.getContainsVisitor());
+  d_iteUtilities = new ITEUtilities(d_tform_remover.getContainsVisitor());
 
   smtStatisticsRegistry()->registerStat(&d_arithSubstitutionsAdded);
 }
@@ -1758,7 +1758,7 @@ theory::LemmaStatus TheoryEngine::lemma(TNode node,
   // Remove the ITEs
   Debug("ite") << "Remove ITE from " << ppNode << std::endl;
   additionalLemmas.push_back(ppNode);
-  d_iteRemover.run(additionalLemmas, iteSkolemMap);
+  d_tform_remover.run(additionalLemmas, iteSkolemMap);
   Debug("ite") << "..done " << additionalLemmas[0] << std::endl;
   additionalLemmas[0] = theory::Rewriter::rewrite(additionalLemmas[0]);
 
@@ -1927,7 +1927,7 @@ void TheoryEngine::mkAckermanizationAsssertions(std::vector<Node>& assertions) {
 
 Node TheoryEngine::ppSimpITE(TNode assertion)
 {
-  if (!d_iteRemover.containsTermITE(assertion)) {
+  if (!d_tform_remover.containsTermITE(assertion)) {
     return assertion;
   } else {
     Node result = d_iteUtilities->simpITE(assertion);
@@ -1968,7 +1968,7 @@ bool TheoryEngine::donePPSimpITE(std::vector<Node>& assertions){
         Chat() << "....node manager contains " << nm->poolSize() << " nodes before cleanup" << endl;
         d_iteUtilities->clear();
         Rewriter::clearCaches();
-        d_iteRemover.garbageCollect();
+        d_tform_remover.garbageCollect();
         nm->reclaimZombiesUntil(options::zombieHuntThreshold());
         Chat() << "....node manager contains " << nm->poolSize() << " nodes after cleanup" << endl;
       }
@@ -1979,7 +1979,7 @@ bool TheoryEngine::donePPSimpITE(std::vector<Node>& assertions){
   if(d_logicInfo.isTheoryEnabled(theory::THEORY_ARITH)
      && !options::incrementalSolving() ){
     if(!simpDidALotOfWork){
-      ContainsTermITEVisitor& contains = *d_iteRemover.getContainsVisitor();
+      ContainsTermITEVisitor& contains = *d_tform_remover.getContainsVisitor();
       arith::ArithIteUtils aiteu(contains, d_userContext, getModel());
       bool anyItes = false;
       for(size_t i = 0;  i < assertions.size(); ++i){

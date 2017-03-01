@@ -780,8 +780,8 @@ Node NodeManager::mkInstConstant(const TypeNode& type) {
   return n;
 }
 
-Node NodeManager::mkBooleanVariable() {
-  Node n = NodeBuilder<0>(this, kind::BOOLEAN_VARIABLE);
+Node NodeManager::mkBooleanTermVariable() {
+  Node n = NodeBuilder<0>(this, kind::BOOLEAN_TERM_VARIABLE);
   n.setAttribute(TypeAttr(), booleanType());
   n.setAttribute(TypeCheckedAttr(), true);
   return n;

@@ -89,7 +89,7 @@ TheoryId Theory::theoryOf(TheoryOfMode mode, TNode node) {
   case THEORY_OF_TYPE_BASED:
     // Constants, variables, 0-ary constructors
     if (node.isVar()) {
-      if( node.getKind() == kind::BOOLEAN_VARIABLE ){
+      if( node.getKind() == kind::BOOLEAN_TERM_VARIABLE ){
         tid = THEORY_UF;
       }else{
         tid = Theory::theoryOf(node.getType());
@@ -111,7 +111,7 @@ TheoryId Theory::theoryOf(TheoryOfMode mode, TNode node) {
         // We treat the variables as uninterpreted
         tid = s_uninterpretedSortOwner;
       } else {
-        if( node.getKind() == kind::BOOLEAN_VARIABLE ){
+        if( node.getKind() == kind::BOOLEAN_TERM_VARIABLE ){
           //Boolean vars go to UF
           tid = THEORY_UF;
         }else{

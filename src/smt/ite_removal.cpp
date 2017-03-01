@@ -25,29 +25,29 @@ using namespace std;
 
 namespace CVC4 {
 
-RemoveITE::RemoveITE(context::UserContext* u)
+RemoveTermFormulas::RemoveTermFormulas(context::UserContext* u)
   : d_iteCache(u)
 {
   d_containsVisitor = new theory::ContainsTermITEVisitor();
 }
 
-RemoveITE::~RemoveITE(){
+RemoveTermFormulas::~RemoveTermFormulas(){
   delete d_containsVisitor;
 }
 
-void RemoveITE::garbageCollect(){
+void RemoveTermFormulas::garbageCollect(){
   d_containsVisitor->garbageCollect();
 }
 
-theory::ContainsTermITEVisitor* RemoveITE::getContainsVisitor() {
+theory::ContainsTermITEVisitor* RemoveTermFormulas::getContainsVisitor() {
   return d_containsVisitor;
 }
 
-size_t RemoveITE::collectedCacheSizes() const{
+size_t RemoveTermFormulas::collectedCacheSizes() const{
   return d_containsVisitor->cache_size() + d_iteCache.size();
 }
 
-void RemoveITE::run(std::vector<Node>& output, IteSkolemMap& iteSkolemMap, bool reportDeps)
+void RemoveTermFormulas::run(std::vector<Node>& output, IteSkolemMap& iteSkolemMap, bool reportDeps)
 {
   size_t n = output.size();
   for (unsigned i = 0, i_end = output.size(); i < i_end; ++ i) {
@@ -69,11 +69,11 @@ void RemoveITE::run(std::vector<Node>& output, IteSkolemMap& iteSkolemMap, bool 
   }
 }
 
-bool RemoveITE::containsTermITE(TNode e) const {
+bool RemoveTermFormulas::containsTermITE(TNode e) const {
   return d_containsVisitor->containsTermITE(e);
 }
 
-Node RemoveITE::run(TNode node, std::vector<Node>& output,
+Node RemoveTermFormulas::run(TNode node, std::vector<Node>& output,
                     IteSkolemMap& iteSkolemMap, bool inQuant, bool inTerm) {
   // Current node
   Debug("ite") << "removeITEs(" << node << ")" << " " << inQuant << " " << inTerm << endl;
@@ -83,6 +83,9 @@ Node RemoveITE::run(TNode node, std::vector<Node>& output,
   //if(node.isVar()){
   //  return Node(node);
   //}
+  if( node.getKind()==kind::INST_PATTERN_LIST ){
+    return Node(node);
+  }
 
   // The result may be cached already
   int cv = cacheVal( inQuant, inTerm );
@@ -124,11 +127,11 @@ Node RemoveITE::run(TNode node, std::vector<Node>& output,
     }
   }
   //if a non-variable Boolean term, replace it
-  if(node.getKind()!=kind::BOOLEAN_VARIABLE && nodeType.isBoolean() && inTerm && !inQuant ){//(!inQuant || !node.hasBoundVar())){
+  if(node.getKind()!=kind::BOOLEAN_TERM_VARIABLE && nodeType.isBoolean() && inTerm && !inQuant ){//(!inQuant || !node.hasBoundVar())){
     Node skolem;
     // Make the skolem to represent the Boolean term
     //skolem = nodeManager->mkSkolem("termBT", nodeType, "a variable introduced due to Boolean term removal");
-    skolem = nodeManager->mkBooleanVariable();
+    skolem = nodeManager->mkBooleanTermVariable();
 
     // The new assertion
     Node newAssertion = skolem.eqNode( node );
@@ -151,9 +154,8 @@ Node RemoveITE::run(TNode node, std::vector<Node>& output,
     // Remember if we're inside a quantifier
     inQuant = true;
   }else if( theory::kindToTheoryId(node.getKind())!=theory::THEORY_BOOL && 
-            node.getKind()!=kind::EQUAL && node.getKind()!=kind::SEP_STAR && node.getKind()!=kind::SEP_WAND && node.getKind()!=kind::SEP_LABEL && 
-            node.getKind()!=kind::INST_ATTRIBUTE && node.getKind()!=kind::INST_PATTERN_LIST && node.getKind()!=kind::INST_PATTERN &&
-            node.getKind()!=kind::REWRITE_RULE && node.getKind()!=kind::RR_REWRITE && node.getKind()!=kind::RR_REDUCTION && node.getKind()!=kind::RR_DEDUCTION ){
+            node.getKind()!=kind::EQUAL && node.getKind()!=kind::SEP_STAR && 
+            node.getKind()!=kind::SEP_WAND && node.getKind()!=kind::SEP_LABEL ){
     // Remember if we're inside a term
     Debug("ite") << "In term because of " << node << " " << node.getKind() << std::endl;
     inTerm = true;
@@ -183,12 +185,15 @@ Node RemoveITE::run(TNode node, std::vector<Node>& output,
   }
 }
 
-Node RemoveITE::replace(TNode node, bool inQuant, bool inTerm) const {
+Node RemoveTermFormulas::replace(TNode node, bool inQuant, bool inTerm) const {
   //if(node.isVar() || node.isConst()){
   //   (options::biasedITERemoval() && !containsTermITE(node))){
   //if(node.isVar()){
   //  return Node(node);
   //}
+  if( node.getKind()==kind::INST_PATTERN_LIST ){
+    return Node(node);
+  }
 
   // Check the cache
   NodeManager *nodeManager = NodeManager::currentNM();

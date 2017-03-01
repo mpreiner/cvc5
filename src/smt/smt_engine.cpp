@@ -559,7 +559,7 @@ public:
   IteSkolemMap d_iteSkolemMap;
 
   /** Instance of the ITE remover */
-  RemoveITE d_iteRemover;
+  RemoveTermFormulas d_iteRemover;
 
 private:
 
