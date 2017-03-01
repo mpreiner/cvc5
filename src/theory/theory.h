@@ -298,7 +298,6 @@ protected:
    * The theory that owns the uninterpreted sort.
    */
   static TheoryId s_uninterpretedSortOwner;
-  static TheoryId s_booleanSortOwner;
 
   void printFacts(std::ostream& os) const;
   void debugPrintFacts() const;
@@ -328,10 +327,6 @@ public:
     if (id == THEORY_BUILTIN) {
       Trace("theory::internal") << "theoryOf(" << typeNode << ") == " << s_uninterpretedSortOwner << std::endl;
       return s_uninterpretedSortOwner;
-    }
-    if (id == THEORY_BOOL) {
-      Trace("theory::internal") << "theoryOf(" << typeNode << ") == " << s_booleanSortOwner << std::endl;
-      return s_booleanSortOwner;
     }
     return id;
   }

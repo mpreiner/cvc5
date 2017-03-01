@@ -34,9 +34,6 @@ namespace theory {
 
 /** Default value for the uninterpreted sorts is the UF theory */
 TheoryId Theory::s_uninterpretedSortOwner = THEORY_UF;
-//--AJR
-TheoryId Theory::s_booleanSortOwner = THEORY_BOOL;
-//--AJR-end
 
 std::ostream& operator<<(std::ostream& os, Theory::Effort level){
   switch(level){
@@ -92,13 +89,11 @@ TheoryId Theory::theoryOf(TheoryOfMode mode, TNode node) {
   case THEORY_OF_TYPE_BASED:
     // Constants, variables, 0-ary constructors
     if (node.isVar()) {
-      tid = Theory::theoryOf(node.getType());
-      //--AJR
       if( node.getKind() == kind::BOOLEAN_VARIABLE ){
         tid = THEORY_UF;
-        Trace("ajr-temp") << "theoryOf " << node << " -> " << tid << std::endl;
+      }else{
+        tid = Theory::theoryOf(node.getType());
       }
-      //--AJR-end
     }else if (node.isConst()) {
       tid = Theory::theoryOf(node.getType());
     } else if (node.getKind() == kind::EQUAL) {
@@ -117,13 +112,11 @@ TheoryId Theory::theoryOf(TheoryOfMode mode, TNode node) {
         tid = s_uninterpretedSortOwner;
       } else {
         if( node.getKind() == kind::BOOLEAN_VARIABLE ){
-          //--AJR
-          tid = s_uninterpretedSortOwner;
-          Trace("ajr-temp") << "theoryOf " << node << " -> " << tid << std::endl;
-          //--AJR-end
+          //Boolean vars go to UF
+          tid = THEORY_UF;
         }else{
           // Except for the Boolean ones
-          tid = s_booleanSortOwner;
+          tid = THEORY_BOOL;
         }
       }
     } else if (node.isConst()) {

@@ -1429,7 +1429,6 @@ void SmtEngine::setDefaults() {
     d_logic = log;
     d_logic.lock();
   }
-  //--AJR
   if(d_logic.isTheoryEnabled(THEORY_ARRAY) || d_logic.isTheoryEnabled(THEORY_DATATYPES) || d_logic.isTheoryEnabled(THEORY_SETS)) {
     if(!d_logic.isTheoryEnabled(THEORY_UF)) {
       LogicInfo log(d_logic.getUnlockedCopy());
@@ -1439,7 +1438,6 @@ void SmtEngine::setDefaults() {
       d_logic.lock();
     }
   }
-  //--AJR-end
 
   // by default, symmetry breaker is on only for QF_UF
   if(! options::ufSymmetryBreaker.wasSetByUser()) {

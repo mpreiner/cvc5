@@ -140,36 +140,10 @@ void TheoryUF::check(Effort level) {
   }
 
   if(! d_conflict ){
-    if( Theory::fullEffort(level) ){
-      //Boolean terms
-      eq::EqualityEngine* ee = getEqualityEngine();
-      eq::EqClassesIterator eqcs_i = eq::EqClassesIterator( ee );
-      while( !eqcs_i.isFinished() ){
-        TNode r = (*eqcs_i);
-        
-        if( r.getType().isBoolean() && r.getKind()==kind::BOOLEAN_VARIABLE ){ //&& r.isVar() ){
-          Assert( !d_proofsEnabled );
-          bool value;
-          if( d_valuation.hasSatValue(r, value) ){
-            Assert( false );
-            //Trace("uf-bt") << r << " has a SAT value : " << value << std::endl;
-            //sat_values[r] = value;
-          }else{
-            //split
-            Node lem = NodeManager::currentNM()->mkNode( kind::OR, r, r.negate() );
-            Trace("uf-bt") << "**** lemma (?) : " << lem << std::endl;
-            d_out->lemma(lem);
-          }
-        }
-        ++eqcs_i;
-      }
-    }
-    if(! d_conflict ){
-      if (d_thss != NULL) {
-        d_thss->check(level);
-        if( d_thss->isConflict() ){
-          d_conflict = true;
-        }
+    if (d_thss != NULL) {
+      d_thss->check(level);
+      if( d_thss->isConflict() ){
+        d_conflict = true;
       }
     }
   }
