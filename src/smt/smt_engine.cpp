@@ -1973,9 +1973,8 @@ void SmtEngine::setDefaults() {
     options::arraysLazyRIntro1.set(false);
   }
 
-  // Non-linear arithmetic does not support models
-  if (d_logic.isTheoryEnabled(THEORY_ARITH) &&
-      !d_logic.isLinear()) {
+  // Non-linear arithmetic does not support models unless nlAlg is enabled
+  if (d_logic.isTheoryEnabled(THEORY_ARITH) && !d_logic.isLinear() && !options::nlAlg() ) {
     if (options::produceModels()) {
       if(options::produceModels.wasSetByUser()) {
         throw OptionException("produce-model not supported with nonlinear arith");

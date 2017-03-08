@@ -146,6 +146,10 @@ TheoryArithPrivate::TheoryArithPrivate(TheoryArith& containing, context::Context
   d_statistics()
 {
   srand(79);
+  
+  if( options::nlAlg() ){
+    d_nla = new NlAlg( containing, d_congruenceManager.getEqualityEngine() );
+  }
 }
 
 TheoryArithPrivate::~TheoryArithPrivate(){
