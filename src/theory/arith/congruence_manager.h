@@ -175,6 +175,10 @@ public:
 
   /** process inferred equalities based on Shostak normalization */
   bool fixpointInfer();
+  
+  
+  eq::EqualityEngine * getEqualityEngine() { return &d_ee; }
+
 private:
   class Statistics {
   public:

@@ -432,6 +432,8 @@ libcvc4_la_SOURCES = \
 	theory/arith/pseudoboolean_proc.cpp \
 	theory/arith/cut_log.h \
 	theory/arith/cut_log.cpp \
+	theory/arith/nl_alg.h \
+	theory/arith/nl_alg.cpp \
 	theory/booleans/type_enumerator.h \
 	theory/booleans/theory_bool.h \
 	theory/booleans/theory_bool.cpp \

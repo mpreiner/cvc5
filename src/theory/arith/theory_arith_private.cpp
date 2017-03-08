@@ -61,6 +61,7 @@
 #include "theory/arith/partial_model.h"
 #include "theory/arith/simplex.h"
 #include "theory/arith/theory_arith.h"
+#include "theory/arith/nl_alg.h"
 #include "theory/ite_utilities.h"
 #include "theory/quantifiers/bounded_integers.h"
 #include "theory/rewriter.h"
@@ -93,7 +94,6 @@ TheoryArithPrivate::TheoryArithPrivate(TheoryArith& containing, context::Context
   d_unknownsInARow(0),
   d_hasDoneWorkSinceCut(false),
   d_learner(u),
-  d_quantEngine(NULL),
   d_assertionsThatDoNotMatchTheirLiterals(c),
   d_nextIntegerCheckVar(0),
   d_constantIntegerVariables(c),
@@ -118,7 +118,9 @@ TheoryArithPrivate::TheoryArithPrivate(TheoryArith& containing, context::Context
   d_fcSimplex(d_linEq, d_errorSet, RaiseConflict(*this), TempVarMalloc(*this)),
   d_soiSimplex(d_linEq, d_errorSet, RaiseConflict(*this), TempVarMalloc(*this)),
   d_attemptSolSimplex(d_linEq, d_errorSet, RaiseConflict(*this), TempVarMalloc(*this)),
-
+  
+  d_nla( NULL ),
+  
   d_pass1SDP(NULL),
   d_otherSDP(NULL),
   d_lastContextIntegerAttempted(c,-1),
@@ -149,6 +151,7 @@ TheoryArithPrivate::TheoryArithPrivate(TheoryArith& containing, context::Context
 TheoryArithPrivate::~TheoryArithPrivate(){
   if(d_treeLog != NULL){ delete d_treeLog; }
   if(d_approxStats != NULL) { delete d_approxStats; }
+  if(d_nla != NULL) { delete d_nla; }
 }
 
 static bool contains(const ConstraintCPVec& v, ConstraintP con){
@@ -207,10 +210,6 @@ static void resolve(ConstraintCPVec& buf, ConstraintP c, const ConstraintCPVec& 
 
 void TheoryArithPrivate::setMasterEqualityEngine(eq::EqualityEngine* eq) {
   d_congruenceManager.setMasterEqualityEngine(eq);
-}
-
-void TheoryArithPrivate::setQuantifiersEngine(QuantifiersEngine* qe) {
-  d_quantEngine = qe;
 }
 
 Node TheoryArithPrivate::getRealDivideBy0Func(){
@@ -1197,7 +1196,22 @@ Node TheoryArithPrivate::ppRewriteTerms(TNode n) {
     }
     break;
   }
-
+  case kind::DIVISION:
+  case kind::DIVISION_TOTAL: {
+    Node num = Rewriter::rewrite(n[0]);
+    Node den = Rewriter::rewrite(n[1]);
+    Assert(!den.isConst());
+    Node var;
+    Node rw = nm->mkNode(k, num, den);
+    if(!rw.getAttribute(LinearIntDivAttr(), var)) {
+      var = nm->mkSkolem("nonlinearDiv", nm->integerType(), "the result of a non-linear div term");
+      rw.setAttribute(LinearIntDivAttr(), var);
+      d_containing.d_out->lemma(nm->mkNode(kind::IMPLIES, den.eqNode(nm->mkConst(Rational(0))).negate(), nm->mkNode(kind::MULT, den, var).eqNode(num)));
+    }
+    return var;
+    break;
+  }
+  
   default:
     ;
   }
@@ -1382,8 +1396,10 @@ void TheoryArithPrivate::setupVariableList(const VarList& vl){
       throw LogicException("A non-linear fact was asserted to arithmetic in a linear logic.");
     }
 
-    setIncomplete();
-    d_nlIncomplete = true;
+    if( !options::nlAlg() ){
+      setIncomplete();
+      d_nlIncomplete = true;
+    }
 
     ++(d_statistics.d_statUserVariables);
     requestArithVar(vlNode, false, false);
@@ -1637,6 +1653,10 @@ void TheoryArithPrivate::setupAtom(TNode atom) {
 
 void TheoryArithPrivate::preRegisterTerm(TNode n) {
   Debug("arith::preregister") <<"begin arith::preRegisterTerm("<< n <<")"<< endl;
+  
+  if( options::nlAlg() ){
+    d_containing.getExtTheory()->registerTermRec( n );
+  }
 
   try {
     if(isRelationOperator(n.getKind())){
@@ -3456,10 +3476,17 @@ bool TheoryArithPrivate::hasFreshArithLiteral(Node n) const{
 void TheoryArithPrivate::check(Theory::Effort effortLevel){
   Assert(d_currentPropagationList.empty());
 
-  if(done() && !Theory::fullEffort(effortLevel) && ( d_qflraStatus == Result::SAT) ){
+  if(done() && effortLevel<Theory::EFFORT_FULL && ( d_qflraStatus == Result::SAT) ){
     return;
   }
-
+  
+  if( effortLevel==Theory::EFFORT_LAST_CALL ){
+    if( options::nlAlg() ){
+      d_nla->check( effortLevel );
+    }
+    return;
+  }
+  
   TimerStat::CodeTimer checkTimer(d_containing.d_checkTime);
   //cout << "TheoryArithPrivate::check " << effortLevel << std::endl;
   Debug("effortlevel") << "TheoryArithPrivate::check " << effortLevel << std::endl;
@@ -3771,7 +3798,15 @@ void TheoryArithPrivate::check(Theory::Effort effortLevel){
         outputRestart();
       }
     }
-  }//if !emmittedConflictOrSplit && fullEffort(effortLevel) && !hasIntegerModel()
+  }
+  
+  if(!emmittedConflictOrSplit && effortLevel>=Theory::EFFORT_FULL){
+    if( options::nlAlg() ){
+      d_nla->check( effortLevel );
+    }
+  }
+    
+  //if !emmittedConflictOrSplit && fullEffort(effortLevel) && !hasIntegerModel()
   if(Theory::fullEffort(effortLevel) && d_nlIncomplete){
     // TODO this is total paranoia
     setIncomplete();
@@ -3947,7 +3982,13 @@ void TheoryArithPrivate::debugPrintModel(std::ostream& out) const{
   }
 }
 
-
+bool TheoryArithPrivate::needsCheckLastEffort() {
+  if( options::nlAlg() ){
+    return d_nla->needsCheckLastEffort();
+  }else{
+    return false;
+  }
+}
 
 Node TheoryArithPrivate::explain(TNode n) {
 
@@ -3978,6 +4019,21 @@ Node TheoryArithPrivate::explain(TNode n) {
   }
 }
 
+bool TheoryArithPrivate::getCurrentSubstitution( int effort, std::vector< Node >& vars, std::vector< Node >& subs, std::map< Node, std::vector< Node > >& exp ) {
+  if( options::nlAlg() ){
+    return d_nla->getCurrentSubstitution( effort, vars, subs, exp );
+  }else{
+    return false;
+  }
+}
+
+bool TheoryArithPrivate::isExtfReduced( int effort, Node n, Node on, std::vector< Node >& exp ) {
+  if( options::nlAlg() ){
+    return d_nla->isExtfReduced( effort, n, on, exp );
+  }else{
+    return false;//d_containing.isExtfReduced( effort, n, on );
+  }
+}
 
 void TheoryArithPrivate::propagate(Theory::Effort e) {
   // This uses model values for safety. Disable for now.

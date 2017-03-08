@@ -103,7 +103,7 @@ bool VarList::isMember(Node n) {
   if(Variable::isMember(n)) {
     return true;
   }
-  if(n.getKind() == kind::MULT) {
+  if(n.getKind() == (options::nlAlg() ? kind::UMULT : kind::MULT)) {
     Node::iterator curr = n.begin(), end = n.end();
     Node prev = *curr;
     if(!Variable::isMember(prev)) return false;
@@ -189,7 +189,7 @@ VarList VarList::operator*(const VarList& other) const {
     merge_ranges(thisBegin, thisEnd, otherBegin, otherEnd, result, cmp);
 
     Assert(result.size() >= 2);
-    Node mult = NodeManager::currentNM()->mkNode(kind::MULT, result);
+    Node mult = NodeManager::currentNM()->mkNode(options::nlAlg() ? kind::UMULT : kind::MULT, result);
     return VarList::parseVarList(mult);
   }
 }
@@ -534,6 +534,7 @@ Integer Polynomial::denominatorLCM() const {
   }
   return tmp;
 }
+
 
 Constant Polynomial::getCoefficient(const VarList& vl) const{
   //TODO improve to binary search...
