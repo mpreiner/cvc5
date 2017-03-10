@@ -1093,9 +1093,11 @@ void NlAlg::check(Theory::Effort e) {
               ci[x][coeff][rhs] = type;
               ci_exp[x][coeff][rhs] = exp;
             }else if( type!=its->second ){
+              Trace("nl-alg-bound-debug2") << "Joining kinds : " << type << " " << its->second << std::endl;
               Kind jk = joinKinds( type, its->second );
-              Assert( jk!=kind::UNDEFINED_KIND );
-              if( jk!=its->second ){
+              if( jk==kind::UNDEFINED_KIND ){
+                updated = false;
+              }else if( jk!=its->second ){
                 if( jk==type ){
                   ci[x][coeff][rhs] = type;
                   ci_exp[x][coeff][rhs] = exp;

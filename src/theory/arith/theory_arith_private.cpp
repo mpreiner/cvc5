@@ -1146,58 +1146,86 @@ Node TheoryArithPrivate::ppRewriteTerms(TNode n) {
 
   case kind::INTS_DIVISION:
   case kind::INTS_DIVISION_TOTAL: {
-    if(!options::rewriteDivk()) {
+    Node den = Rewriter::rewrite(n[1]);
+    if(!options::rewriteDivk() && den.isConst()) {
       return n;
     }
     Node num = Rewriter::rewrite(n[0]);
-    Node den = Rewriter::rewrite(n[1]);
-    if(den.isConst()) {
-      const Rational& rat = den.getConst<Rational>();
-      Assert(!num.isConst());
-      if(rat != 0) {
-        Node intVar;
-        Node rw = nm->mkNode(k, num, den);
-        if(!rw.getAttribute(LinearIntDivAttr(), intVar)) {
-          intVar = nm->mkSkolem("linearIntDiv", nm->integerType(), "the result of an intdiv-by-k term");
-          rw.setAttribute(LinearIntDivAttr(), intVar);
+    Node intVar;
+    Node rw = nm->mkNode(k, num, den);
+    if(!rw.getAttribute(LinearIntDivAttr(), intVar)) {
+      intVar = nm->mkSkolem("linearIntDiv", nm->integerType(), "the result of an intdiv-by-k term");
+      rw.setAttribute(LinearIntDivAttr(), intVar);
+      Node lem;
+      if (den.isConst()) {
+        const Rational& rat = den.getConst<Rational>();
+        Assert(!num.isConst());
+        if(rat != 0) {
           if(rat > 0) {
-            d_containing.d_out->lemma(nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(1)))))));
+            lem = nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), 
+                                        nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(1))))));
           } else {
-            d_containing.d_out->lemma(nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(-1)))))));
+            lem = nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), 
+                                        nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(-1))))));
           }
         }
-        return intVar;
+      }else{
+        lem = nm->mkNode(kind::AND,
+                nm->mkNode(kind::IMPLIES, NodeManager::currentNM()->mkNode( kind::GT, den, nm->mkConst(Rational(0)) ),
+                  nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), 
+                                        nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(1))))))),
+                nm->mkNode(kind::IMPLIES, NodeManager::currentNM()->mkNode( kind::LT, den, nm->mkConst(Rational(0)) ),
+                  nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), 
+                                        nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(-1))))))));                
+      }    
+      if( !lem.isNull() ){
+        d_containing.d_out->lemma(lem);
       }
     }
+    return intVar;
     break;
   }
 
   case kind::INTS_MODULUS:
   case kind::INTS_MODULUS_TOTAL: {
-    if(!options::rewriteDivk()) {
+    Node den = Rewriter::rewrite(n[1]);
+    if(!options::rewriteDivk() && den.isConst()) {
       return n;
     }
     Node num = Rewriter::rewrite(n[0]);
-    Node den = Rewriter::rewrite(n[1]);
-    if(den.isConst()) {
-      const Rational& rat = den.getConst<Rational>();
-      Assert(!num.isConst());
-      if(rat != 0) {
-        Node intVar;
-        Node rw = nm->mkNode(k, num, den);
-        if(!rw.getAttribute(LinearIntDivAttr(), intVar)) {
-          intVar = nm->mkSkolem("linearIntDiv", nm->integerType(), "the result of an intdiv-by-k term");
-          rw.setAttribute(LinearIntDivAttr(), intVar);
+    Node intVar;
+    Node rw = nm->mkNode(k, num, den);
+    if(!rw.getAttribute(LinearIntDivAttr(), intVar)) {
+      intVar = nm->mkSkolem("linearIntDiv", nm->integerType(), "the result of an intdiv-by-k term");
+      rw.setAttribute(LinearIntDivAttr(), intVar);
+      Node lem;
+      if(den.isConst()) {
+        const Rational& rat = den.getConst<Rational>();
+        Assert(!num.isConst());
+        if(rat != 0) {
           if(rat > 0) {
-            d_containing.d_out->lemma(nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(1)))))));
+            lem = nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), 
+                                        nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(1))))));
           } else {
-            d_containing.d_out->lemma(nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(-1)))))));
+            lem = nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), 
+                                        nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(-1))))));
           }
         }
-        Node node = nm->mkNode(kind::MINUS, num, nm->mkNode(kind::MULT, den, intVar));
-        return node;
+      }else{
+        lem = nm->mkNode(kind::AND,
+                nm->mkNode(kind::IMPLIES, NodeManager::currentNM()->mkNode( kind::GT, den, nm->mkConst(Rational(0)) ),
+                  nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), 
+                                        nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(1))))))),
+                nm->mkNode(kind::IMPLIES, NodeManager::currentNM()->mkNode( kind::LT, den, nm->mkConst(Rational(0)) ), 
+                  nm->mkNode(kind::AND, nm->mkNode(kind::LEQ, nm->mkNode(kind::MULT, den, intVar), num), 
+                                        nm->mkNode(kind::LT, num, nm->mkNode(kind::MULT, den, nm->mkNode(kind::PLUS, intVar, nm->mkConst(Rational(-1))))))));
+      }    
+      if( !lem.isNull() ){
+        d_containing.d_out->lemma(lem);
       }
     }
+    Node node = nm->mkNode(kind::MINUS, num, nm->mkNode(kind::MULT, den, intVar));
+    return node;
     break;
   }
   case kind::DIVISION:

@@ -369,6 +369,7 @@ void Smt2Printer::toStream(std::ostream& out, TNode n,
     // arith theory
   case kind::PLUS:
   case kind::MULT:
+  case kind::UMULT:
   case kind::MINUS:
   case kind::UMINUS:
   case kind::LT:
@@ -733,6 +734,7 @@ static string smtKindString(Kind k) throw() {
     // arith theory
   case kind::PLUS: return "+";
   case kind::MULT: return "*";
+  case kind::UMULT: return "*";
   case kind::MINUS: return "-";
   case kind::UMINUS: return "-";
   case kind::LT: return "<";

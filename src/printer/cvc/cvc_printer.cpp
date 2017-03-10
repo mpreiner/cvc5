@@ -497,6 +497,7 @@ void CvcPrinter::toStream(std::ostream& out, TNode n, int depth, bool types, boo
       opType = INFIX;
       break;
     case kind::MULT:
+    case kind::UMULT:
       op << '*';
       opType = INFIX;
       break;
