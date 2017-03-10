@@ -165,7 +165,7 @@ option pbRewriteThreshold --pb-rewrite-threshold int :default 256
 option sNormInferEq --snorm-infer-eq bool :default false
  infer equalities based on Shostak normalization
 
-option nlAlg --nl-alg bool :default true
+option nlAlg --nl-alg bool :default false
  algebraic approach to non-linear
  
 option nlAlgResBound --nl-alg-rbound bool :default false
