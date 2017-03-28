@@ -21,6 +21,8 @@
 
 #include <ext/hash_set>
 #include <iosfwd>
+#include <map>
+#include <set>
 #include <string>
 
 #include "context/cdlist.h"
@@ -35,6 +37,8 @@
 #include "smt/command.h"
 #include "smt/dump.h"
 #include "smt/logic_request.h"
+#include "theory/assertion.h"
+#include "theory/care_graph.h"
 #include "theory/logic_info.h"
 #include "theory/output_channel.h"
 #include "theory/valuation.h"
@@ -63,67 +67,6 @@ namespace eq {
 }/* CVC4::theory::eq namespace */
 
 /**
- * Information about an assertion for the theories.
- */
-struct Assertion {
-
-  /** The assertion */
-  Node assertion;
-  /** Has this assertion been preregistered with this theory */
-  bool isPreregistered;
-
-  Assertion(TNode assertion, bool isPreregistered)
-  : assertion(assertion), isPreregistered(isPreregistered) {}
-
-  /**
-   * Convert the assertion to a TNode.
-   */
-  operator TNode () const {
-    return assertion;
-  }
-
-  /**
-   * Convert the assertion to a Node.
-   */
-  operator Node () const {
-    return assertion;
-  }
-
-};/* struct Assertion */
-
-/**
- * A (oredered) pair of terms a theory cares about.
- */
-struct CarePair {
-
-  TNode a, b;
-  TheoryId theory;
-
-public:
-
-  CarePair(TNode a, TNode b, TheoryId theory)
-  : a(a < b ? a : b), b(a < b ? b : a), theory(theory) {}
-
-  bool operator == (const CarePair& other) const {
-    return (theory == other.theory) && (a == other.a) && (b == other.b);
-  }
-
-  bool operator < (const CarePair& other) const {
-    if (theory < other.theory) return true;
-    if (theory > other.theory) return false;
-    if (a < other.a) return true;
-    if (a > other.a) return false;
-    return b < other.b;
-  }
-
-};/* struct CarePair */
-
-/**
- * A set of care pairs.
- */
-typedef std::set<CarePair> CareGraph;
-
-/**
  * Base class for T-solvers.  Abstract DPLL(T).
  *
  * This is essentially an interface class.  The TheoryEngine has
@@ -144,9 +87,7 @@ private:
   Theory(const Theory&) CVC4_UNDEFINED;
   Theory& operator=(const Theory&) CVC4_UNDEFINED;
 
-  /**
-   * An integer identifying the type of the theory
-   */
+  /** An integer identifying the type of the theory. */
   TheoryId d_id;
 
   /** Name of this theory instance. Along with the TheoryId this should provide
@@ -154,19 +95,13 @@ private:
    * this to ensure unique statistics names over multiple theory instances. */
   std::string d_instanceName;
 
-  /**
-   * The SAT search context for the Theory.
-   */
+  /** The SAT search context for the Theory. */
   context::Context* d_satContext;
 
-  /**
-   * The user level assertion context for the Theory.
-   */
+  /** The user level assertion context for the Theory. */
   context::UserContext* d_userContext;
 
-  /**
-   * Information about the logic we're operating within.
-   */
+  /** Information about the logic we're operating within. */
   const LogicInfo& d_logicInfo;
 
   /**
@@ -180,31 +115,26 @@ private:
   /** Index into the head of the facts list */
   context::CDO<unsigned> d_factsHead;
 
-  /**
-   * Add shared term to the theory.
-   */
+  /** Add shared term to the theory. */
   void addSharedTermInternal(TNode node);
 
-  /**
-   * Indices for splitting on the shared terms.
-   */
+  /** Indices for splitting on the shared terms. */
   context::CDO<unsigned> d_sharedTermsIndex;
 
-  /**
-   * The care graph the theory will use during combination.
-   */
+  /** The care graph the theory will use during combination. */
   CareGraph* d_careGraph;
 
   /**
-   * Reference to the quantifiers engine (or NULL, if quantifiers are
-   * not supported or not enabled).
+   * Pointer to the quantifiers engine (or NULL, if quantifiers are not
+   * supported or not enabled). Not owned by the theory.
    */
   QuantifiersEngine* d_quantEngine;
 
-protected:
+  /** Extended theory module or NULL. Owned by the theory. */
+  ExtTheory* d_extTheory;
 
-  /** extended theory */
-  ExtTheory * d_extt;
+ protected:
+
 
   // === STATISTICS ===
   /** time spent in check calls */
@@ -215,11 +145,7 @@ protected:
   /**
    * The only method to add suff to the care graph.
    */
-  void addCarePair(TNode t1, TNode t2) {
-    if (d_careGraph) {
-      d_careGraph->insert(CarePair(t1, t2, d_id));
-    }
-  }
+  void addCarePair(TNode t1, TNode t2);
 
   /**
    * The function should compute the care graph over the shared terms.
@@ -236,6 +162,7 @@ protected:
    * Helper function for computeRelevantTerms
    */
   void collectTerms(TNode n, std::set<Node>& termSet) const;
+
   /**
    * Scans the current set of assertions and shared terms top-down
    * until a theory-leaf is reached, and adds all terms found to
@@ -515,7 +442,9 @@ public:
    * Assert a fact in the current context.
    */
   void assertFact(TNode assertion, bool isPreregistered) {
-    Trace("theory") << "Theory<" << getId() << ">::assertFact[" << d_satContext->getLevel() << "](" << assertion << ", " << (isPreregistered ? "true" : "false") << ")" << std::endl;
+    Trace("theory") << "Theory<" << getId() << ">::assertFact["
+                    << d_satContext->getLevel() << "](" << assertion << ", "
+                    << (isPreregistered ? "true" : "false") << ")" << std::endl;
     d_facts.push_back(Assertion(assertion, isPreregistered));
   }
 
@@ -530,30 +459,26 @@ public:
    */
   virtual void setMasterEqualityEngine(eq::EqualityEngine* eq) { }
 
-  /**
-   * Called to set the quantifiers engine.
-   */
-  virtual void setQuantifiersEngine(QuantifiersEngine* qe) {
-    d_quantEngine = qe;
-  }
+  /** Called to set the quantifiers engine. */
+  virtual void setQuantifiersEngine(QuantifiersEngine* qe);
+
+  /** Setup an ExtTheory module for this Theory. Can only be called once. */
+  void setupExtTheory();
 
   /**
-   * Return the current theory care graph. Theories should overload computeCareGraph to do
-   * the actual computation, and use addCarePair to add pairs to the care graph.
+   * Return the current theory care graph. Theories should overload
+   * computeCareGraph to do the actual computation, and use addCarePair to add
+   * pairs to the care graph.
    */
-  void getCareGraph(CareGraph& careGraph) {
-    Trace("sharing") << "Theory<" << getId() << ">::getCareGraph()" << std::endl;
-    TimerStat::CodeTimer computeCareGraphTime(d_computeCareGraphTime);
-    d_careGraph = &careGraph;
-    computeCareGraph();
-    d_careGraph = NULL;
-  }
+  void getCareGraph(CareGraph* careGraph);
 
   /**
-   * Return the status of two terms in the current context. Should be implemented in
-   * sub-theories to enable more efficient theory-combination.
+   * Return the status of two terms in the current context. Should be
+   * implemented in sub-theories to enable more efficient theory-combination.
    */
-  virtual EqualityStatus getEqualityStatus(TNode a, TNode b) { return EQUALITY_UNKNOWN; }
+  virtual EqualityStatus getEqualityStatus(TNode a, TNode b) {
+    return EQUALITY_UNKNOWN;
+  }
 
   /**
    * Return the model value of the give shared term (or null if not available).
@@ -570,14 +495,11 @@ public:
    * - or call get() until done() is true.
    */
   virtual void check(Effort level = EFFORT_FULL) { }
-  
-  /**
-   * Needs last effort check?
-   */ 
+
+  /** Needs last effort check? */
   virtual bool needsCheckLastEffort() { return false; }
-  /**
-   * T-propagate new literal assignments in the current context.
-   */
+
+  /** T-propagate new literal assignments in the current context. */
   virtual void propagate(Effort level = EFFORT_FULL) { }
 
   /**
@@ -598,9 +520,10 @@ public:
    * class.
    */
   virtual void collectModelInfo( TheoryModel* m, bool fullModel ){ }
+
   /** if theories want to do something with model after building, do it here */
   virtual void postProcessModel( TheoryModel* m ){ }
-  
+
   /**
    * Return a decision request, if the theory has one, or the NULL node
    * otherwise.
@@ -647,12 +570,12 @@ public:
    * Don't preprocess subterm of this term
    */
   virtual bool ppDontRewriteSubterm(TNode atom) { return false; }
-  
-  /** notify preprocessed assertions
-   *  Called on new assertions after preprocessing before they are asserted to theory engine.
-   *  Should not modify assertions.
-  */
-  virtual void ppNotifyAssertions( std::vector< Node >& assertions ) {}
+
+  /**
+   * Notify preprocessed assertions. Called on new assertions after
+   * preprocessing before they are asserted to theory engine.
+   */
+  virtual void ppNotifyAssertions(const std::vector<Node>& assertions) {}
 
   /**
    * A Theory is called with presolve exactly one time per user
@@ -894,40 +817,47 @@ public:
    * @return         a pair <b,E> s.t. if b is true, then a formula E such that
    * E |= lit in the theory.
    */
-  virtual std::pair<bool, Node> entailmentCheck(TNode lit, const EntailmentCheckParameters* params = NULL, EntailmentCheckSideEffects* out = NULL);
+  virtual std::pair<bool, Node> entailmentCheck(
+      TNode lit, const EntailmentCheckParameters* params = NULL,
+      EntailmentCheckSideEffects* out = NULL);
 
   /* equality engine TODO: use? */
-  virtual eq::EqualityEngine * getEqualityEngine() { return NULL; }
-  
-  /* get extended theory */
-  virtual ExtTheory * getExtTheory() { return d_extt; }
+  virtual eq::EqualityEngine* getEqualityEngine() { return NULL; }
+
+  /* Get extended theory if one has been installed. */
+  ExtTheory* getExtTheory();
 
   /* get current substitution at an effort
    *   input : vars
-   *   output : subs, exp 
+   *   output : subs, exp
    *   where ( exp[vars[i]] => vars[i] = subs[i] ) holds for all i
-  */
-  virtual bool getCurrentSubstitution( int effort, std::vector< Node >& vars, std::vector< Node >& subs, std::map< Node, std::vector< Node > >& exp ) { return false; }
-  
+   */
+  virtual bool getCurrentSubstitution(int effort, std::vector<Node>& vars,
+                                      std::vector<Node>& subs,
+                                      std::map<Node, std::vector<Node> >& exp) {
+    return false;
+  }
+
   /* is extended function reduced */
   virtual bool isExtfReduced( int effort, Node n, Node on, std::vector< Node >& exp ) { return n.isConst(); }
   
-  /* get reduction for node
-       if return value is not 0, then n is reduced. 
-       if return value <0 then n is reduced SAT-context-independently (e.g. by a lemma that persists at this user-context level).
-       if nr is non-null, then ( n = nr ) should be added as a lemma by caller, and return value should be <0.
+  /**
+   * Get reduction for node
+   * If return value is not 0, then n is reduced.
+   * If return value <0 then n is reduced SAT-context-independently (e.g. by a
+   *  lemma that persists at this user-context level).
+   * If nr is non-null, then ( n = nr ) should be added as a lemma by caller,
+   *  and return value should be <0.
    */
   virtual int getReduction( int effort, Node n, Node& nr ) { return 0; }
 
-  /**
-   * Turn on proof-production mode.
-   */
+  /** Turn on proof-production mode. */
   void produceProofs() { d_proofsEnabled = true; }
 
 };/* class Theory */
 
 std::ostream& operator<<(std::ostream& os, theory::Theory::Effort level);
-inline std::ostream& operator<<(std::ostream& out, const theory::Assertion& a);
+
 
 inline theory::Assertion Theory::get() {
   Assert( !done(), "Theory::get() called with assertion queue empty!" );
@@ -943,10 +873,6 @@ inline theory::Assertion Theory::get() {
   }
 
   return fact;
-}
-
-inline std::ostream& operator<<(std::ostream& out, const theory::Assertion& a) {
-  return out << a.assertion;
 }
 
 inline std::ostream& operator<<(std::ostream& out,
@@ -990,10 +916,21 @@ public:
 
 
 class ExtTheory {
-  friend class Theory;
   typedef context::CDHashMap<Node, bool, NodeHashFunction> NodeBoolMap;
   typedef context::CDHashSet<Node, NodeHashFunction> NodeSet;
-protected:
+private:
+  // collect variables
+  static std::vector<Node> collectVars(Node n);
+  // is context dependent inactive
+  bool isContextIndependentInactive( Node n ) const;
+  //do inferences internal
+  bool doInferencesInternal(int effort, const std::vector<Node>& terms,
+                            std::vector<Node>& nred, bool batch, bool isRed);
+  // send lemma
+  bool sendLemma( Node lem, bool preprocess = false );
+  // register term (recursive)
+  void registerTermRec(Node n, std::set<Node>* visited);
+
   Theory * d_parent;
   Node d_true;
   //extended string terms, map to whether they are active
@@ -1012,17 +949,7 @@ protected:
     std::vector< Node > d_vars;
   };
   std::map< Node, ExtfInfo > d_extf_info;
-  //collect variables
-  void collectVars( Node n, std::vector< Node >& vars, std::map< Node, bool >& visited );
-  // is context dependent inactive
-  bool isContextIndependentInactive( Node n );
-  //do inferences internal
-  bool doInferencesInternal( int effort, std::vector< Node >& terms, std::vector< Node >& nred, bool batch, bool isRed ); 
-  //send lemma
-  bool sendLemma( Node lem, bool preprocess = false );
-  //register term (recursive)
-  void registerTermRec( Node n, std::map< Node, bool >& visited );
-private: //caches
+
   //cache of all lemmas sent
   NodeSet d_lemmas;
   NodeSet d_pp_lemmas;
@@ -1035,13 +962,16 @@ private: //caches
     std::vector< Node > d_exp;
   };
   std::map< int, std::map< Node, SubsTermInfo > > d_gst_cache;
-public:
-  ExtTheory( Theory * p, bool cacheEnabled = false );
-  virtual ~ExtTheory(){}
-  //add extf kind
-  void addFunctionKind( Kind k ) { d_extf_kind[k] = true; }
-  bool hasFunctionKind( Kind k ) { return d_extf_kind.find( k )!=d_extf_kind.end(); }
-  //register term
+
+ public:
+  ExtTheory(Theory* p, bool cacheEnabled = false );
+  virtual ~ExtTheory() {}
+  // add extf kind
+  void addFunctionKind(Kind k) { d_extf_kind[k] = true; }
+  bool hasFunctionKind(Kind k) const {
+    return d_extf_kind.find(k) != d_extf_kind.end();
+  }
+  // register term
   //  adds n to d_ext_func_terms if addFunctionKind( n.getKind() ) was called
   void registerTerm( Node n );
   void registerTermRec( Node n );
@@ -1054,29 +984,36 @@ public:
   //  input : effort, terms
   //  output : sterms, exp, where ( exp[i] => terms[i] = sterms[i] ) for all i
   Node getSubstitutedTerm( int effort, Node term, std::vector< Node >& exp, bool useCache = false );
-  void getSubstitutedTerms( int effort, std::vector< Node >& terms, std::vector< Node >& sterms, std::vector< std::vector< Node > >& exp, bool useCache = false );
-  //doInferences
-  //  * input : effort, terms, batch (whether to send one lemma or lemmas for all terms)
-  //  *   sends rewriting lemmas of the form ( exp => t = c ) where t is in terms and c is a constant, c = rewrite( t*sigma ) where exp |= sigma
+  void getSubstitutedTerms(int effort, const std::vector<Node>& terms,
+                           std::vector<Node>& sterms,
+                           std::vector<std::vector<Node> >& exp, bool useCache = false);
+  // doInferences
+  //  * input : effort, terms, batch (whether to send one lemma or lemmas for
+  //    all terms)
+  //  * sends rewriting lemmas of the form ( exp => t = c ) where t is in terms
+  //    and c is a constant, c = rewrite( t*sigma ) where exp |= sigma
   //  * output : nred (the terms that are still active)
   //  * return : true iff lemma is sent
-  bool doInferences( int effort, std::vector< Node >& terms, std::vector< Node >& nred, bool batch=true ); 
-  bool doInferences( int effort, std::vector< Node >& nred, bool batch=true  );
+  bool doInferences(int effort, const std::vector<Node>& terms,
+                    std::vector<Node>& nred, bool batch = true);
+  bool doInferences(int effort, std::vector<Node>& nred, bool batch = true);
   //doReductions 
-  //  same as doInferences, but will send reduction lemmas of the form ( t = t' ) where t is in terms, t' is equivalent, reduced term
-  bool doReductions( int effort, std::vector< Node >& terms, std::vector< Node >& nred, bool batch=true  ); 
-  bool doReductions( int effort, std::vector< Node >& nred, bool batch=true  ); 
+  // same as doInferences, but will send reduction lemmas of the form ( t = t' )
+  // where t is in terms, t' is equivalent, reduced term.
+  bool doReductions(int effort, const std::vector<Node>& terms,
+                    std::vector<Node>& nred, bool batch = true);
+  bool doReductions(int effort, std::vector<Node>& nred, bool batch = true);
 
   //get the set of terms from d_ext_func_terms
   void getTerms( std::vector< Node >& terms );
-  //has active term 
+  // has active term
   bool hasActiveTerm();
-  //is n active
-  bool isActive( Node n );
-  //get the set of active terms from d_ext_func_terms
-  void getActive( std::vector< Node >& active );
-  //get the set of active terms from d_ext_func_terms of kind k
-  void getActive( std::vector< Node >& active, Kind k );
+  // is n active
+  bool isActive(Node n);
+  // get the set of active terms from d_ext_func_terms
+  std::vector<Node> getActive() const;
+  // get the set of active terms from d_ext_func_terms of kind k
+  std::vector<Node> getActive(Kind k) const;
   //clear cache 
   void clearCache();
 };

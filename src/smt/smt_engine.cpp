@@ -1014,7 +1014,7 @@ SmtEngine::SmtEngine(ExprManager* em) throw() :
   // being parsed from the input file. Because of this, we cannot trust
   // that options::proof() is set correctly yet.
 #ifdef CVC4_PROOF
-  d_proofManager = new ProofManager();
+  d_proofManager = new ProofManager(d_userContext);
 #endif
 
   // We have mutual dependency here, so we add the prop engine to the theory
@@ -1752,6 +1752,12 @@ void SmtEngine::setDefaults() {
       options::prenexQuant.set( quantifiers::PRENEX_QUANT_NONE );
     }
   }
+  if( options::mbqiMode()==quantifiers::MBQI_ABS ){
+    if( !d_logic.isPure(THEORY_UF) ){
+      //MBQI_ABS is only supported in pure quantified UF
+      options::mbqiMode.set( quantifiers::MBQI_FMC );
+    }
+  } 
   if( options::ufssSymBreak() ){
     options::sortInference.set( true );
   }
@@ -1998,8 +2004,8 @@ void SmtEngine::setDefaults() {
     }
   }
 
-  if(options::incrementalSolving() && (options::proof() || options::unsatCores())) {
-    Warning() << "SmtEngine: turning off incremental solving mode (not yet supported with --proof or --produce-unsat-cores, try --tear-down-incremental instead)" << endl;
+  if(options::incrementalSolving() && options::proof()) {
+    Warning() << "SmtEngine: turning off incremental solving mode (not yet supported with --proof, try --tear-down-incremental instead)" << endl;
     setOption("incremental", SExpr("false"));
   }
 }
@@ -2059,7 +2065,7 @@ void SmtEngine::setInfo(const std::string& key, const CVC4::SExpr& value)
         value.getValue() == "2.0" ) {
       // supported SMT-LIB version
       if(!options::outputLanguage.wasSetByUser() &&
-         options::outputLanguage() == language::output::LANG_SMTLIB_V2_5) {
+         ( options::outputLanguage() == language::output::LANG_SMTLIB_V2_5 || options::outputLanguage() == language::output::LANG_SMTLIB_V2_6 )) {
         options::outputLanguage.set(language::output::LANG_SMTLIB_V2_0);
         *options::out() << language::SetLanguage(language::output::LANG_SMTLIB_V2_0);
       }
@@ -2071,6 +2077,15 @@ void SmtEngine::setInfo(const std::string& key, const CVC4::SExpr& value)
          options::outputLanguage() == language::output::LANG_SMTLIB_V2_0) {
         options::outputLanguage.set(language::output::LANG_SMTLIB_V2_5);
         *options::out() << language::SetLanguage(language::output::LANG_SMTLIB_V2_5);
+      }
+      return;
+    } else if( (value.isRational() && value.getRationalValue() == Rational(13, 5)) ||
+               value.getValue() == "2.6" ) {
+      // supported SMT-LIB version
+      if(!options::outputLanguage.wasSetByUser() &&
+         options::outputLanguage() == language::output::LANG_SMTLIB_V2_0) {
+        options::outputLanguage.set(language::output::LANG_SMTLIB_V2_6);
+        *options::out() << language::SetLanguage(language::output::LANG_SMTLIB_V2_6);
       }
       return;
     }
@@ -2298,7 +2313,7 @@ Node SmtEnginePrivate::expandDefinitions(TNode n, hash_map<Node, Node, NodeHashF
       }
 
       // otherwise expand it
-      bool doExpand = ( k == kind::APPLY && n.getOperator().getKind() != kind::LAMBDA );
+      bool doExpand = k == kind::APPLY;
       if( !doExpand ){
         if( options::macrosQuant() ){
           //expand if we have inferred an operator corresponds to a defined function
@@ -2306,35 +2321,47 @@ Node SmtEnginePrivate::expandDefinitions(TNode n, hash_map<Node, Node, NodeHashF
         }
       }
       if (doExpand) {
-        // application of a user-defined symbol
-        TNode func = n.getOperator();
-        SmtEngine::DefinedFunctionMap::const_iterator i = d_smt.d_definedFunctions->find(func);
-        if(i == d_smt.d_definedFunctions->end()) {
-          throw TypeCheckingException(n.toExpr(), string("Undefined function: `") + func.toString() + "'");
-        }
-        DefinedFunction def = (*i).second;
-        vector<Node> formals = def.getFormals();
-
-        if(Debug.isOn("expand")) {
-          Debug("expand") << "found: " << n << endl;
-          Debug("expand") << " func: " << func << endl;
-          string name = func.getAttribute(expr::VarNameAttr());
-          Debug("expand") << "     : \"" << name << "\"" << endl;
-        }
-        if(Debug.isOn("expand")) {
-          Debug("expand") << " defn: " << def.getFunction() << endl
-                          << "       [";
-          if(formals.size() > 0) {
-            copy( formals.begin(), formals.end() - 1,
-                  ostream_iterator<Node>(Debug("expand"), ", ") );
-            Debug("expand") << formals.back();
+        vector<Node> formals;
+        TNode fm;
+        if( n.getOperator().getKind() == kind::LAMBDA ){
+          TNode op = n.getOperator();
+          // lambda
+          for( unsigned i=0; i<op[0].getNumChildren(); i++ ){
+            formals.push_back( op[0][i] );
           }
-          Debug("expand") << "]" << endl
-                          << "       " << def.getFunction().getType() << endl
-                          << "       " << def.getFormula() << endl;
-        }
+          fm = op[1];
+        }else{
+          // application of a user-defined symbol
+          TNode func = n.getOperator();
+          SmtEngine::DefinedFunctionMap::const_iterator i = d_smt.d_definedFunctions->find(func);
+          if(i == d_smt.d_definedFunctions->end()) {
+            throw TypeCheckingException(n.toExpr(), string("Undefined function: `") + func.toString() + "'");
+          }
+          DefinedFunction def = (*i).second;
+          formals = def.getFormals();
 
-        TNode fm = def.getFormula();
+          if(Debug.isOn("expand")) {
+            Debug("expand") << "found: " << n << endl;
+            Debug("expand") << " func: " << func << endl;
+            string name = func.getAttribute(expr::VarNameAttr());
+            Debug("expand") << "     : \"" << name << "\"" << endl;
+          }
+          if(Debug.isOn("expand")) {
+            Debug("expand") << " defn: " << def.getFunction() << endl
+                            << "       [";
+            if(formals.size() > 0) {
+              copy( formals.begin(), formals.end() - 1,
+                    ostream_iterator<Node>(Debug("expand"), ", ") );
+              Debug("expand") << formals.back();
+            }
+            Debug("expand") << "]" << endl
+                            << "       " << def.getFunction().getType() << endl
+                            << "       " << def.getFormula() << endl;
+          }
+
+          fm = def.getFormula();
+        }
+        
         Node instance = fm.substitute(formals.begin(), formals.end(),
                                       n.begin(), n.end());
         Debug("expand") << "made : " << instance << endl;
@@ -5194,7 +5221,7 @@ UnsatCore SmtEngine::getUnsatCore() throw(ModalException, UnsafeInterruptExcepti
   }
 
   d_proofManager->traceUnsatCore();// just to trigger core creation
-  return UnsatCore(this, d_proofManager->begin_unsat_core(), d_proofManager->end_unsat_core());
+  return UnsatCore(this, d_proofManager->extractUnsatCore());
 #else /* IS_PROOFS_BUILD */
   throw ModalException("This build of CVC4 doesn't have proof support (required for unsat cores).");
 #endif /* IS_PROOFS_BUILD */

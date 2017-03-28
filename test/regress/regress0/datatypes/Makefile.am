@@ -74,7 +74,12 @@ TESTS =	\
 	dt-param-card4-bool-sat.smt2 \
 	bug604.smt2 \
 	bug597-rbt.smt2 \
-	example-dailler-min.smt2
+	example-dailler-min.smt2 \
+	dt-2.6.smt2  \
+	dt-sel-2.6.smt2 \
+	dt-param-2.6.smt2 \
+	dt-color-2.6.smt2 \
+	dt-match-pat-param-2.6.smt2
 
 FAILING_TESTS = \
 	datatype-dump.cvc

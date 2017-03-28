@@ -20,13 +20,13 @@
 	(! f1 formula
 	(! f2 formula
 	   formula)))
-	
+
 (define formula_op3
 	(! f1 formula
 	(! f2 formula
 	(! f3 formula
 	   formula))))
-	   
+
 (declare not formula_op1)
 (declare and formula_op2)
 (declare or formula_op2)
@@ -71,10 +71,79 @@
  (! x (term Bool)
  (! u (th_holds (p_app x))
    (th_holds (= Bool x t_true)))))
+
 (declare pred_eq_f
  (! x (term Bool)
  (! u (th_holds (not (p_app x)))
    (th_holds (= Bool x t_false)))))
+
+(declare f_to_b
+  (! f formula
+    (term Bool)))
+
+(declare true_preds_equal
+  (! x1 (term Bool)
+  (! x2 (term Bool)
+  (! u1 (th_holds (p_app x1))
+  (! u2 (th_holds (p_app x2))
+    (th_holds (= Bool x1 x2)))))))
+
+(declare false_preds_equal
+  (! x1 (term Bool)
+  (! x2 (term Bool)
+  (! u1 (th_holds (not (p_app x1)))
+  (! u2 (th_holds (not (p_app x2)))
+    (th_holds (= Bool x1 x2)))))))
+
+(declare pred_refl_pos
+  (! x1 (term Bool)
+  (! u1 (th_holds (p_app x1))
+    (th_holds (= Bool x1 x1)))))
+
+(declare pred_refl_neg
+  (! x1 (term Bool)
+  (! u1 (th_holds (not (p_app x1)))
+    (th_holds (= Bool x1 x1)))))
+
+(declare pred_not_iff_f
+  (! x (term Bool)
+  (! u (th_holds (not (iff false (p_app x))))
+    (th_holds (= Bool t_true x)))))
+
+(declare pred_not_iff_f_2
+  (! x (term Bool)
+  (! u (th_holds (not (iff (p_app x) false)))
+    (th_holds (= Bool x t_true)))))
+
+(declare pred_not_iff_t
+  (! x (term Bool)
+  (! u (th_holds (not (iff true (p_app x))))
+    (th_holds (= Bool t_false x)))))
+
+(declare pred_not_iff_t_2
+  (! x (term Bool)
+  (! u (th_holds (not (iff (p_app x) true)))
+    (th_holds (= Bool x t_false)))))
+
+(declare pred_iff_f
+  (! x (term Bool)
+  (! u (th_holds (iff false (p_app x)))
+    (th_holds (= Bool t_false x)))))
+
+(declare pred_iff_f_2
+  (! x (term Bool)
+  (! u (th_holds (iff (p_app x) false))
+    (th_holds (= Bool x t_false)))))
+
+(declare pred_iff_t
+  (! x (term Bool)
+  (! u (th_holds (iff true (p_app x)))
+    (th_holds (= Bool t_true x)))))
+
+(declare pred_iff_t_2
+  (! x (term Bool)
+  (! u (th_holds (iff (p_app x) true))
+    (th_holds (= Bool x t_true)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
@@ -107,8 +176,8 @@
        (! vbv (bvatom v bv_v)
          (holds cln))))))
     (holds cln))))
-    
-    
+
+
 ; clausify a formula directly
 (declare clausify_form
   (! f formula
@@ -116,14 +185,14 @@
   (! a (atom v f)
   (! u (th_holds f)
     (holds (clc (pos v) cln)))))))
-    
+
 (declare clausify_form_not
   (! f formula
   (! v var
   (! a (atom v f)
   (! u (th_holds (not f))
     (holds (clc (neg v) cln)))))))
-    
+
 (declare clausify_false
   (! u (th_holds false)
     (holds cln)))
@@ -134,7 +203,7 @@
   (! u2 (! v (th_holds f) (holds cln))
     (holds cln)))))
 
-  
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
 ; Natural deduction rules : used for CNF
@@ -191,7 +260,7 @@
   (! f2 formula
   (! u2 (th_holds (not (or f1 f2)))
     (th_holds (and (not f1) (not f2)))))))
-    
+
 ;; and elimination
 
 (declare and_elim_1
@@ -211,7 +280,7 @@
   (! f2 formula
   (! u2 (th_holds (not (and f1 f2)))
     (th_holds (or (not f1) (not f2)))))))
-    
+
 ;; impl elimination
 
 (declare impl_intro (! f1 formula
@@ -231,7 +300,7 @@
   (! f2 formula
   (! u (th_holds (not (impl f1 f2)))
     (th_holds (and f1 (not f2)))))))
-    
+
 ;; iff elimination
 
 (declare iff_elim_1
@@ -358,10 +427,10 @@
   (! u (! o (holds (clc (neg bv_v) cln)) ;; l binding to be used in proof
          (holds C))
     (holds (clc (pos v) C))))))))))
-    
+
 (declare bv_ast
   (! v var
-  (! bv_v var	
+  (! bv_v var
   (! f formula
   (! C clause
   (! r (atom v f)       ; this is specified
@@ -397,7 +466,7 @@
 ;;	...
 ;;      (or_elim_1 _ _ l2
 ;; 	(or_elim_1 _ _ l1 A))))) ln)
-;;	
+;;
 ;;))))))) (\ C
 ;;
 ;; We now have the free variable C, which should be the clause (v1 V ... V vn).
@@ -415,9 +484,7 @@
 ;;   (contra _ l3
 ;;      (or_elim_1 _ _ l2
 ;; 	(or_elim_1 _ _ (not_not_intro l1) A))))
-;;	
+;;
 ;;))))))) (\ C
 ;;
 ;; C should be the clause (~v1 V v2 V ~v3 )
-
-

@@ -37,9 +37,9 @@ TheoryArith::TheoryArith(context::Context* c, context::UserContext* u,
     , d_ppRewriteTimer("theory::arith::ppRewriteTimer")
 {
   smtStatisticsRegistry()->registerStat(&d_ppRewriteTimer);
-  if( options::nlAlg() ){
-    d_extt = new ExtTheory( this );
-    d_extt->addFunctionKind( kind::UMULT );
+  if (options::nlAlg()) {
+    setupExtTheory();
+    getExtTheory()->addFunctionKind(kind::UMULT);
   }
 }
 

@@ -71,9 +71,9 @@ TheoryBV::TheoryBV(context::Context* c, context::UserContext* u,
     d_extf_range_infer(u),
     d_extf_collapse_infer(u)
 {
-  d_extt = new ExtTheory( this );
-  d_extt->addFunctionKind( kind::BITVECTOR_TO_NAT );
-  d_extt->addFunctionKind( kind::INT_TO_BITVECTOR );
+  setupExtTheory();
+  getExtTheory()->addFunctionKind(kind::BITVECTOR_TO_NAT);
+  getExtTheory()->addFunctionKind(kind::INT_TO_BITVECTOR);
 
   if (options::bitblastMode() == theory::bv::BITBLAST_MODE_EAGER) {
     d_eagerSolver = new EagerBitblastSolver(this);
@@ -114,7 +114,6 @@ TheoryBV::~TheoryBV() {
     delete d_subtheories[i];
   }
   delete d_abstractionModule;
-  delete d_extt;
 }
 
 void TheoryBV::setMasterEqualityEngine(eq::EqualityEngine* eq) {
@@ -397,10 +396,9 @@ void TheoryBV::check(Effort e)
   }
   
   //last call : do reductions on extended bitvector functions
-  if( e==Theory::EFFORT_LAST_CALL ){
-    std::vector< Node > nred;
-    getExtTheory()->getActive( nred );
-    doExtfReductions( nred );
+  if (e == Theory::EFFORT_LAST_CALL) {
+    std::vector<Node> nred = getExtTheory()->getActive();
+    doExtfReductions(nred);
     return;
   }
 

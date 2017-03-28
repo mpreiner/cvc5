@@ -269,9 +269,13 @@ option sygusNormalFormGlobalContent --sygus-nf-sym-content bool :default true
   
 option sygusInvTemplMode --sygus-inv-templ=MODE CVC4::theory::quantifiers::SygusInvTemplMode :default CVC4::theory::quantifiers::SYGUS_INV_TEMPL_MODE_NONE :include "options/quantifiers_modes.h" :handler stringToSygusInvTemplMode
   template mode for sygus invariant synthesis
+option sygusUnifCondSol --sygus-unif-csol bool :default false
+  enable approach which unifies conditional solutions
 
 option sygusDirectEval --sygus-direct-eval bool :default true
   direct unfolding of evaluation functions
+option sygusCRefEval --sygus-cref-eval bool :default false
+  direct evaluation of refinement lemmas for conflict analysis
   
 # approach applied to general quantified formulas
 option cbqi --cbqi bool :read-write :default false

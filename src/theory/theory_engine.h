@@ -187,6 +187,7 @@ class TheoryEngine {
    * Model builder object
    */
   theory::TheoryEngineModelBuilder* d_curr_model_builder;
+  bool d_aloc_curr_model_builder;
 
   typedef std::hash_map<Node, Node, NodeHashFunction> NodeMap;
   typedef std::hash_map<TNode, Node, TNodeHashFunction> TNodeMap;
@@ -603,18 +604,11 @@ public:
    */
   Node preprocess(TNode node);
 
+  /** Notify (preprocessed) assertions. */
+  void notifyPreprocessedAssertions(const std::vector<Node>& assertions);
 
-  /**
-   * Notify (preprocessed) assertions 
-   */
-  void notifyPreprocessedAssertions( std::vector< Node >& assertions );
-
-  /**
-   * Return whether or not we are incomplete (in the current context).
-   */
-  inline bool isIncomplete() const {
-    return d_incomplete;
-  }
+  /** Return whether or not we are incomplete (in the current context). */
+  inline bool isIncomplete() const { return d_incomplete; }
 
   /**
    * Returns true if we need another round of checking.  If this

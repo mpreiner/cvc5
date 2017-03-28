@@ -615,10 +615,10 @@ void BoundedIntegers::getBoundValues( Node f, Node v, RepSetIterator * rsi, Node
   getBounds( f, v, rsi, l, u );
   Trace("bound-int-rsi") << "Get value in model for..." << l << " and " << u << std::endl;
   if( !l.isNull() ){
-    l = d_quantEngine->getModel()->getCurrentModelValue( l );
+    l = d_quantEngine->getModel()->getValue( l );
   }
   if( !u.isNull() ){
-    u = d_quantEngine->getModel()->getCurrentModelValue( u );
+    u = d_quantEngine->getModel()->getValue( u );
   }
   Trace("bound-int-rsi") << "Value is " << l << " ... " << u << std::endl;
   return;
@@ -656,7 +656,7 @@ Node BoundedIntegers::getSetRangeValue( Node q, Node v, RepSetIterator * rsi ) {
   Node sr = getSetRange( q, v, rsi );
   if( !sr.isNull() ){
     Trace("bound-int-rsi") << "Get value in model for..." << sr << std::endl;
-    sr = d_quantEngine->getModel()->getCurrentModelValue( sr );
+    sr = d_quantEngine->getModel()->getValue( sr );
     //if non-constant, then sr does not occur in the model, we fail
     if( !sr.isConst() ){
       return Node::null();
@@ -679,7 +679,7 @@ Node BoundedIntegers::getSetRangeValue( Node q, Node v, RepSetIterator * rsi ) {
         for( unsigned i = 0; it != it_end; ++ it, ++i ){
           Node lit = (*it).assertion;
           if( lit.getKind()==kind::MEMBER ){
-            Node vr = d_quantEngine->getModel()->getCurrentModelValue( lit[0] );
+            Node vr = d_quantEngine->getModel()->getValue( lit[0] );
             Trace("bound-int-rsi-debug") << "....membership for " << lit << " ==> " << vr << std::endl;
             Trace("bound-int-rsi-debug") << "  " << (val_to_term.find( vr )!=val_to_term.end()) << " " << d_quantEngine->getEqualityQuery()->areEqual( d_setm_range_lit[q][v][1], lit[1] ) << std::endl;
             if( val_to_term.find( vr )!=val_to_term.end() ){
@@ -797,6 +797,7 @@ bool BoundedIntegers::getBoundElements( RepSetIterator * rsi, bool initial, Node
       Node l, u;
       getBoundValues( q, v, rsi, l, u );
       if( l.isNull() || u.isNull() ){
+        Trace("bound-int-warn") << "WARNING: Could not find integer bounds in model for " << v << " in " << q << std::endl;
         //failed, abort the iterator
         return false;
       }else{
@@ -824,6 +825,7 @@ bool BoundedIntegers::getBoundElements( RepSetIterator * rsi, bool initial, Node
     }else if( bvt==BOUND_SET_MEMBER  ){ 
       Node srv = getSetRangeValue( q, v, rsi );
       if( srv.isNull() ){
+        Trace("bound-int-warn") << "WARNING: Could not find set bound in model for " << v << " in " << q << std::endl;
         return false;
       }else{
         Trace("bound-int-rsi") << "Bounded by set membership : " << srv << std::endl;
