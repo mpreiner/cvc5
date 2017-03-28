@@ -42,9 +42,7 @@ ArithCongruenceManager::ArithCongruenceManager(context::Context* c, ConstraintDa
     d_avariables(avars),
     d_ee(d_notify, c, "theory::arith::ArithCongruenceManager", true)
 {
-  if( options::nlAlg() ){
-    d_ee.addFunctionKind(kind::UMULT);
-  }
+  d_ee.addFunctionKind(kind::NONLINEAR_MULT);
   //module to infer additional equalities based on normalization
   if( options::sNormInferEq() ){
     d_eq_infer = new quantifiers::EqualityInference(c, true);

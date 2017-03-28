@@ -32,7 +32,6 @@
 #include "expr/node_self_iterator.h"
 #include "theory/arith/delta_rational.h"
 #include "util/rational.h"
-#include "options/arith_options.h"
 
 
 namespace CVC4 {
@@ -488,7 +487,7 @@ private:
   static Node multList(const std::vector<Variable>& list) {
     Assert(list.size() >= 2);
 
-    return makeNode(options::nlAlg() ? kind::UMULT : kind::MULT, list.begin(), list.end());
+    return makeNode(kind::NONLINEAR_MULT, list.begin(), list.end());
   }
 
   VarList() : NodeWrapper(Node::null()) {}
@@ -590,7 +589,7 @@ public:
 
   bool empty() const { return getNode().isNull(); }
   bool singleton() const {
-    return !empty() && getNode().getKind() != ( options::nlAlg() ? kind::UMULT : kind::MULT );
+    return !empty() && getNode().getKind() != kind::NONLINEAR_MULT;
   }
 
   int size() const {

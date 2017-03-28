@@ -588,7 +588,7 @@ private:
   Node intToBV(TNode n, NodeToNodeHashMap& cache);
   Node intToBVMakeBinary(TNode n, NodeToNodeHashMap& cache);
   Node purifyNlTerms(TNode n, NodeToNodeHashMap& cache, NodeToNodeHashMap& bcache, std::vector< Node >& var_eq, bool beneathMult = false);
-  
+
   /**
    * Helper function to fix up assertion list to restore invariants needed after
    * ite removal.

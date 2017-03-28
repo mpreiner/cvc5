@@ -37,7 +37,7 @@ namespace CVC4 {
 namespace theory {
 namespace arith {
 
-class NlAlg {
+class NonlinearExtension {
   typedef context::CDHashSet<Node, NodeHashFunction> NodeSet;
 
 //monomial information (context-independent)
@@ -47,7 +47,7 @@ private:
     std::map< TNode, MonomialIndex > d_data;
     std::vector< Node > d_monos;
     //status 0 : n equal, -1 : n superset, 1 : n subset
-    void addTerm( TNode n, std::vector< TNode >& reps, NlAlg * nla, int status = 0, unsigned argIndex = 0 ) {
+    void addTerm( TNode n, std::vector< TNode >& reps, NonlinearExtension * nla, int status = 0, unsigned argIndex = 0 ) {
       if( status==0 ){
         if( argIndex==reps.size() ){
           d_monos.push_back( n );
@@ -184,8 +184,8 @@ private:
                              std::map< Node, Node >& rep_to_const, std::map< Node, Node >& rep_to_const_exp, 
                              std::map< Node, Node >& rep_to_const_base );
 public:
-  NlAlg( TheoryArith& containing, eq::EqualityEngine * ee );
-  ~NlAlg();
+  NonlinearExtension( TheoryArith& containing, eq::EqualityEngine * ee );
+  ~NonlinearExtension();
   bool getCurrentSubstitution( int effort, std::vector< Node >& vars, std::vector< Node >& subs, std::map< Node, std::vector< Node > >& exp );
   bool isExtfReduced( int effort, Node n, Node on, std::vector< Node >& exp );
   void check(Theory::Effort e);

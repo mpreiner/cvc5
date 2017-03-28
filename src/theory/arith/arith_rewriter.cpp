@@ -31,7 +31,7 @@ namespace arith {
 
 bool ArithRewriter::isAtom(TNode n) {
   Kind k = n.getKind();
-  return arith::isRelationOperator(k) || k == kind::IS_INTEGER 
+  return arith::isRelationOperator(k) || k == kind::IS_INTEGER
       || k == kind::DIVISIBLE;
 }
 
@@ -100,7 +100,7 @@ RewriteResponse ArithRewriter::preRewriteTerm(TNode t){
     case kind::PLUS:
       return preRewritePlus(t);
     case kind::MULT:
-    case kind::UMULT:
+    case kind::NONLINEAR_MULT:
       return preRewriteMult(t);
     case kind::INTS_DIVISION:
     case kind::INTS_MODULUS:
@@ -149,7 +149,7 @@ RewriteResponse ArithRewriter::postRewriteTerm(TNode t){
     case kind::PLUS:
       return postRewritePlus(t);
     case kind::MULT:
-    case kind::UMULT:
+    case kind::NONLINEAR_MULT:
       return postRewriteMult(t);
     case kind::INTS_DIVISION:
     case kind::INTS_MODULUS:
@@ -224,7 +224,7 @@ RewriteResponse ArithRewriter::postRewriteTerm(TNode t){
 
 
 RewriteResponse ArithRewriter::preRewriteMult(TNode t){
-  Assert(t.getKind()== kind::MULT || t.getKind()== kind::UMULT);
+  Assert(t.getKind()== kind::MULT || t.getKind()== kind::NONLINEAR_MULT);
 
   if(t.getNumChildren() == 2){
     if(t[0].getKind() == kind::CONST_RATIONAL
@@ -318,7 +318,7 @@ RewriteResponse ArithRewriter::postRewritePlus(TNode t){
 }
 
 RewriteResponse ArithRewriter::postRewriteMult(TNode t){
-  Assert(t.getKind()== kind::MULT || t.getKind()==kind::UMULT);
+  Assert(t.getKind()== kind::MULT || t.getKind()==kind::NONLINEAR_MULT);
 
   Polynomial res = Polynomial::mkOne();
 

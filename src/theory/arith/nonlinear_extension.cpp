@@ -15,7 +15,7 @@
  ** \todo document this file
  **/
 
-#include "theory/arith/nl_alg.h"
+#include "theory/arith/nonlinear_extension.h"
 
 #include "theory/arith/theory_arith.h"
 #include "theory/arith/arith_utilities.h"
@@ -34,9 +34,9 @@ void debugPrintBound( const char * c, Node coeff, Node x, Kind type, Node rhs ){
   Trace(c) << t << " " << type <<  " " << rhs;
 }
 
-struct sortNlAlg {
-  sortNlAlg() : d_nla(NULL),d_order_type(0),d_reverse_order(false){}
-  NlAlg * d_nla;
+struct sortNonlinearExtension {
+  sortNonlinearExtension() : d_nla(NULL),d_order_type(0),d_reverse_order(false){}
+  NonlinearExtension * d_nla;
   unsigned d_order_type;
   bool d_reverse_order;
   bool operator() (Node i, Node j) {
@@ -49,7 +49,7 @@ struct sortNlAlg {
   }
 };
 
-NlAlg::NlAlg( TheoryArith& containing, eq::EqualityEngine * ee ) : 
+NonlinearExtension::NonlinearExtension( TheoryArith& containing, eq::EqualityEngine * ee ) : 
 d_lemmas( containing.getUserContext() ), d_zero_split( containing.getUserContext() ),  d_containing( containing ),  d_ee( ee ), d_needsLastCall( false ) {
   d_true = NodeManager::currentNM()->mkConst( true );
   d_false = NodeManager::currentNM()->mkConst( false );
@@ -61,11 +61,11 @@ d_lemmas( containing.getUserContext() ), d_zero_split( containing.getUserContext
   d_order_points.push_back( d_one );
 }
 
-NlAlg::~NlAlg() {
+NonlinearExtension::~NonlinearExtension() {
 
 }
 
-bool NlAlg::isMonomialSubset( Node a, Node b ) {  
+bool NonlinearExtension::isMonomialSubset( Node a, Node b ) {  
   std::map< Node, std::map< TNode, unsigned > >::iterator ita = d_m_exp.find( a );
   std::map< Node, std::map< TNode, unsigned > >::iterator itb = d_m_exp.find( b );
   Assert( ita!=d_m_exp.end() );
@@ -89,14 +89,20 @@ bool NlAlg::isMonomialSubset( Node a, Node b ) {
   Assert( !diff_children.empty() );
   d_m_contain_parent[a].push_back( b );
   d_m_contain_children[b].push_back( a );
-  Node dterm = diff_children.size()==1 ? diff_children[0] : NodeManager::currentNM()->mkNode( kind::MULT, diff_children );
+  Node dterm = diff_children.size() == 1 ? diff_children[0]
+                                         : NodeManager::currentNM()->mkNode(
+                                               kind::MULT, diff_children);
   d_m_contain_mult[a][b] = dterm;
-  d_m_contain_umult[a][b] = diff_children.size()==1 ? diff_children[0] : NodeManager::currentNM()->mkNode( kind::UMULT, diff_children );
-  Trace("nl-alg-mindex") << "..." << a << " is a subset of " << b << ", difference is " << dterm << std::endl;
+  d_m_contain_umult[a][b] = diff_children.size() == 1
+                                ? diff_children[0]
+                                : NodeManager::currentNM()->mkNode(
+                                      kind::NONLINEAR_MULT, diff_children);
+  Trace("nl-alg-mindex") << "..." << a << " is a subset of " << b
+                         << ", difference is " << dterm << std::endl;
   return true;
 }
 
-Node NlAlg::getSubstitutionConst( Node n, std::vector< Node >& sum, std::vector< Node >& rep_sum, Node& v,
+Node NonlinearExtension::getSubstitutionConst( Node n, std::vector< Node >& sum, std::vector< Node >& rep_sum, Node& v,
                                   std::map< Node, Node >& rep_to_const, std::map< Node, Node >& rep_to_const_exp, 
                                   std::map< Node, Node >& rep_to_const_base, std::vector< Node >& r_c_exp ){
   std::vector< Node > vars;
@@ -127,7 +133,7 @@ Node NlAlg::getSubstitutionConst( Node n, std::vector< Node >& sum, std::vector<
   return ns; 
 }
 
-void NlAlg::setSubstitutionConst( Node r, Node r_c, Node r_cb, std::vector< Node >& r_c_exp, 
+void NonlinearExtension::setSubstitutionConst( Node r, Node r_c, Node r_cb, std::vector< Node >& r_c_exp, 
                                   std::map< Node, std::vector< int > >& rep_to_subs_index, std::vector< Node >& vars, std::vector< Node >& subs, 
                                   std::map< Node, std::vector< Node > >& exp, bool& retVal, std::map< Node, std::vector< Node > > reps_to_terms,
                                   std::map< Node, int >& term_to_nconst_rep_count, std::map< Node, std::vector< Node > > reps_to_parent_terms,
@@ -254,7 +260,7 @@ void NlAlg::setSubstitutionConst( Node r, Node r_c, Node r_cb, std::vector< Node
   }
 }
 
-bool NlAlg::getCurrentSubstitution( int effort, std::vector< Node >& vars, std::vector< Node >& subs, std::map< Node, std::vector< Node > >& exp ) {
+bool NonlinearExtension::getCurrentSubstitution( int effort, std::vector< Node >& vars, std::vector< Node >& subs, std::map< Node, std::vector< Node > >& exp ) {
   //get the constant equivalence classes
   std::map< Node, std::vector< int > > rep_to_subs_index;
 
@@ -367,7 +373,7 @@ bool NlAlg::getCurrentSubstitution( int effort, std::vector< Node >& vars, std::
   //d_containing.getValuation().getModel()->getRepresentative( n );
 }
 
-bool NlAlg::isExtfReduced( int effort, Node n, Node on, std::vector< Node >& exp ) {
+bool NonlinearExtension::isExtfReduced( int effort, Node n, Node on, std::vector< Node >& exp ) {
 /*
   if( n.isConst() ){
     return true;
@@ -409,10 +415,10 @@ bool NlAlg::isExtfReduced( int effort, Node n, Node on, std::vector< Node >& exp
   }
 
   //return n!=on;
-  return n.getKind()!=kind::UMULT;
+  return n.getKind()!=kind::NONLINEAR_MULT;
 }
 
-Node NlAlg::computeModelValue( Node n, unsigned index ) {
+Node NonlinearExtension::computeModelValue( Node n, unsigned index ) {
   std::map< Node, Node >::iterator it = d_mv[index].find( n );
   if( it!=d_mv[index].end() ){
     return it->second;
@@ -425,7 +431,7 @@ Node NlAlg::computeModelValue( Node n, unsigned index ) {
       if( n.getNumChildren()==0 ){
         ret = d_containing.getValuation().getModel()->getValue( n ); 
       }else{
-        if( index==1 && n.getKind()==kind::UMULT ){
+        if( index==1 && n.getKind()==kind::NONLINEAR_MULT ){
           if( d_containing.getValuation().getModel()->hasTerm( n ) ){
             //use model value for abstraction
             ret = d_containing.getValuation().getModel()->getRepresentative( n );
@@ -461,11 +467,11 @@ Node NlAlg::computeModelValue( Node n, unsigned index ) {
   }
 }
 
-void NlAlg::registerMonomial( Node n ) {
+void NonlinearExtension::registerMonomial( Node n ) {
   if( std::find( d_monomials.begin(), d_monomials.end(), n )==d_monomials.end() ){
     d_monomials.push_back( n );
     Trace("nl-alg-debug") << "Register monomial : " << n << std::endl;
-    if( n.getKind()==kind::UMULT ){
+    if( n.getKind()==kind::NONLINEAR_MULT ){
       //get exponent count
       for( unsigned k=0; k<n.getNumChildren(); k++ ){
         d_m_exp[n][n[k]]++;
@@ -491,14 +497,14 @@ void NlAlg::registerMonomial( Node n ) {
   }
 }
 
-void NlAlg::setMonomialFactor( Node a, Node b, std::map< TNode, unsigned >& common ) {
+void NonlinearExtension::setMonomialFactor( Node a, Node b, std::map< TNode, unsigned >& common ) {
   if( d_mono_diff[a].find( b )==d_mono_diff[a].end() ){
     Trace("nl-alg-mono-factor") << "Set monomial factor for " << a << "/" << b << std::endl;
     d_mono_diff[a][b] = mkMonomialRemFactor( a, common );
   }
 }
 
-void NlAlg::registerConstraint( Node atom ) {
+void NonlinearExtension::registerConstraint( Node atom ) {
   if( std::find( d_constraints.begin(), d_constraints.end(), atom )==d_constraints.end() ){
     d_constraints.push_back( atom );
     Trace("nl-alg-debug") << "Register constraint : " << atom << std::endl;
@@ -557,11 +563,11 @@ void NlAlg::registerConstraint( Node atom ) {
   }
 }
 
-bool NlAlg::isArithKind( Kind k ) {
-  return k==kind::PLUS || k==kind::MULT || k==kind::UMULT;
+bool NonlinearExtension::isArithKind( Kind k ) {
+  return k==kind::PLUS || k==kind::MULT || k==kind::NONLINEAR_MULT;
 }
 
-Node NlAlg::mkAnd( std::vector< Node >& a ) {
+Node NonlinearExtension::mkAnd( std::vector< Node >& a ) {
   if( a.empty() ) {
     return d_true;
   } else if( a.size() == 1 ) {
@@ -571,7 +577,7 @@ Node NlAlg::mkAnd( std::vector< Node >& a ) {
   }
 }
 
-Node NlAlg::mkLit( Node a, Node b, int status, int orderType ){
+Node NonlinearExtension::mkLit( Node a, Node b, int status, int orderType ){
   if( status==0 ){
     if( orderType==0 ){
       return a.eqNode( b );
@@ -599,7 +605,7 @@ Node NlAlg::mkLit( Node a, Node b, int status, int orderType ){
   }
 }
 
-Node NlAlg::mkAbs( Node a ) {
+Node NonlinearExtension::mkAbs( Node a ) {
   if( a.isConst() ){
     if( a==d_one || a==d_zero ){
       return a;
@@ -612,7 +618,7 @@ Node NlAlg::mkAbs( Node a ) {
 }
 
 // by a <k1> b, a <k2> b, we know a <ret> b
-Kind NlAlg::joinKinds( Kind k1, Kind k2 ) {
+Kind NonlinearExtension::joinKinds( Kind k1, Kind k2 ) {
   if( k2<k1 ){
     return joinKinds( k2, k1 );
   }else if( k1==k2 ){
@@ -642,7 +648,7 @@ Kind NlAlg::joinKinds( Kind k1, Kind k2 ) {
 }
 
 // by a <k1> b, b <k2> c, we know a <ret> c
-Kind NlAlg::transKinds( Kind k1, Kind k2 ) {
+Kind NonlinearExtension::transKinds( Kind k1, Kind k2 ) {
   if( k2<k1 ){
     return transKinds( k2, k1 );
   }else if( k1==k2 ){
@@ -665,10 +671,10 @@ Kind NlAlg::transKinds( Kind k1, Kind k2 ) {
   }
 }
 
-bool NlAlg::hasNewMonomials( Node n, std::vector< Node >& existing, std::map< Node, bool >& visited ) {
+bool NonlinearExtension::hasNewMonomials( Node n, std::vector< Node >& existing, std::map< Node, bool >& visited ) {
   if( visited.find( n )==visited.end() ){
     visited[n] = true;
-    if( n.getKind()==kind::UMULT ){
+    if( n.getKind()==kind::NONLINEAR_MULT ){
       return std::find( existing.begin(), existing.end(), n )==existing.end();
     }else{
       for( unsigned i=0; i<n.getNumChildren(); i++ ){
@@ -681,7 +687,7 @@ bool NlAlg::hasNewMonomials( Node n, std::vector< Node >& existing, std::map< No
   return false;
 }
 
-Node NlAlg::mkMonomialRemFactor( Node n, std::map< TNode, unsigned >& n_exp_rem ) {
+Node NonlinearExtension::mkMonomialRemFactor( Node n, std::map< TNode, unsigned >& n_exp_rem ) {
   std::vector< Node > children;  
   std::map< Node, std::map< TNode, unsigned > >::iterator itme = d_m_exp.find( n );
   Assert( itme!=d_m_exp.end() );
@@ -705,23 +711,23 @@ Node NlAlg::mkMonomialRemFactor( Node n, std::map< TNode, unsigned >& n_exp_rem 
   return ret;
 }
  
-bool NlAlg::flushLemma( Node lem ) {
-  Trace("nl-alg-lemma-debug") << "NlAlg::Lemma pre-rewrite : " << lem << std::endl;
+bool NonlinearExtension::flushLemma( Node lem ) {
+  Trace("nl-alg-lemma-debug") << "NonlinearExtension::Lemma pre-rewrite : " << lem << std::endl;
   lem = Rewriter::rewrite( lem );
   if( d_lemmas.find( lem )==d_lemmas.end() ){
     d_lemmas.insert( lem );
-    Trace("nl-alg-lemma") << "NlAlg::Lemma : " << lem << std::endl;
+    Trace("nl-alg-lemma") << "NonlinearExtension::Lemma : " << lem << std::endl;
     d_containing.getOutputChannel().lemma( lem );
     return true;
   }else{
-    Trace("nl-alg-lemma-debug") << "NlAlg::Lemma duplicate : " << lem << std::endl;
+    Trace("nl-alg-lemma-debug") << "NonlinearExtension::Lemma duplicate : " << lem << std::endl;
     //should not generate duplicates
     //Assert( false );
     return false;
   }
 }
 
-int NlAlg::flushLemmas( std::vector< Node >& lemmas ) {
+int NonlinearExtension::flushLemmas( std::vector< Node >& lemmas ) {
   if( options::nlAlgEntailConflicts() ){
     //check if any are entailed to be false
     for( unsigned i=0; i<lemmas.size(); i++ ){
@@ -751,9 +757,9 @@ int NlAlg::flushLemmas( std::vector< Node >& lemmas ) {
   return sum;
 }
 
-void NlAlg::check(Theory::Effort e) {
+void NonlinearExtension::check(Theory::Effort e) {
   Trace("nl-alg") << std::endl;
-  Trace("nl-alg") << "NlAlg::check, effort = " << e << std::endl;
+  Trace("nl-alg") << "NonlinearExtension::check, effort = " << e << std::endl;
   if( e==Theory::EFFORT_FULL ){
     d_containing.getExtTheory()->clearCache();
     d_needsLastCall = true;
@@ -902,7 +908,7 @@ void NlAlg::check(Theory::Effort e) {
         assignOrderIds( ms_vars, d_order_vars[r], r );
        
         //sort individual variable lists
-        sortNlAlg smv;
+        sortNonlinearExtension smv;
         smv.d_nla = this;
         smv.d_order_type = r;
         smv.d_reverse_order = true;
@@ -1023,7 +1029,7 @@ void NlAlg::check(Theory::Effort e) {
       }
 
       //sort monomials by degree
-      sortNlAlg snlad;
+      sortNonlinearExtension snlad;
       snlad.d_nla = this;
       snlad.d_order_type = 4;
       snlad.d_reverse_order = false;
@@ -1424,8 +1430,8 @@ void NlAlg::check(Theory::Effort e) {
   }
 }
 
-void NlAlg::assignOrderIds( std::vector< Node >& vars, std::map< Node, unsigned >& order, unsigned orderType ) {
-  sortNlAlg smv;
+void NonlinearExtension::assignOrderIds( std::vector< Node >& vars, std::map< Node, unsigned >& order, unsigned orderType ) {
+  sortNonlinearExtension smv;
   smv.d_nla = this;
   smv.d_order_type = orderType;
   smv.d_reverse_order = false;
@@ -1473,7 +1479,7 @@ void NlAlg::assignOrderIds( std::vector< Node >& vars, std::map< Node, unsigned 
   }
 }
 
-int NlAlg::compare( Node i, Node j, unsigned orderType ) {
+int NonlinearExtension::compare( Node i, Node j, unsigned orderType ) {
   if( orderType>=0 && orderType<=3 ){
     return compare_value( get_compare_value( i, orderType ), get_compare_value( j, orderType ), orderType );
   //minimal degree
@@ -1488,7 +1494,7 @@ int NlAlg::compare( Node i, Node j, unsigned orderType ) {
   }
 }
 
-int NlAlg::compare_value( Node i, Node j, unsigned orderType ) {
+int NonlinearExtension::compare_value( Node i, Node j, unsigned orderType ) {
   Assert( orderType>=0 && orderType<=3 );
   Trace("nl-alg-debug") << "compare_value " << i << " " << j << ", o = " << orderType << std::endl;
   int ret;
@@ -1505,7 +1511,7 @@ int NlAlg::compare_value( Node i, Node j, unsigned orderType ) {
   return ret;
 }
 
-Node NlAlg::get_compare_value( Node i, unsigned orderType ) {
+Node NonlinearExtension::get_compare_value( Node i, unsigned orderType ) {
   Trace("nl-alg-debug") << "Compare variable " << i << " " << orderType << std::endl;
   Assert( orderType>=0 && orderType<=3 );
   std::map< Node, Node >::iterator iti;
@@ -1516,7 +1522,7 @@ Node NlAlg::get_compare_value( Node i, unsigned orderType ) {
 }
 
 // trying to show a <> 0 by inequalities between variables in monomial a w.r.t 0
-int NlAlg::compareSign( Node oa, Node a, unsigned a_index, int status, std::vector< Node >& exp, std::vector< Node >& lem ) {
+int NonlinearExtension::compareSign( Node oa, Node a, unsigned a_index, int status, std::vector< Node >& exp, std::vector< Node >& lem ) {
   Trace("nl-alg-debug") << "Process " << a << " at index " << a_index << ", status is " << status << std::endl;
   Assert( d_mv[1].find( oa )!=d_mv[1].end() );
   if( a_index==d_m_vlist[a].size() ){
@@ -1549,7 +1555,7 @@ int NlAlg::compareSign( Node oa, Node a, unsigned a_index, int status, std::vect
   }
 }
 
-bool NlAlg::compareMonomial( Node oa, Node a, std::map< TNode, unsigned >& a_exp_proc, 
+bool NonlinearExtension::compareMonomial( Node oa, Node a, std::map< TNode, unsigned >& a_exp_proc, 
                              Node ob, Node b, std::map< TNode, unsigned >& b_exp_proc, 
                              std::vector< Node >& exp, std::vector< Node >& lem,
                              std::map< int, std::map< Node, std::map< Node, Node > > >& cmp_infers ) {
@@ -1568,7 +1574,7 @@ bool NlAlg::compareMonomial( Node oa, Node a, std::map< TNode, unsigned >& a_exp
   }
 }
                    
-bool NlAlg::cmp_holds( Node x, Node y, std::map< Node, std::map< Node, Node > >& cmp_infers, std::vector< Node >& exp, std::map< Node, bool >& visited ) {
+bool NonlinearExtension::cmp_holds( Node x, Node y, std::map< Node, std::map< Node, Node > >& cmp_infers, std::vector< Node >& exp, std::map< Node, bool >& visited ) {
   if( x==y ){
     return true;
   }else if( visited.find( x )==visited.end() ){
@@ -1589,7 +1595,7 @@ bool NlAlg::cmp_holds( Node x, Node y, std::map< Node, std::map< Node, Node > >&
 
                       
 // trying to show a ( >, = ) b   by inequalities between variables in monomials a,b
-bool NlAlg::compareMonomial( Node oa, Node a, unsigned a_index, std::map< TNode, unsigned >& a_exp_proc, 
+bool NonlinearExtension::compareMonomial( Node oa, Node a, unsigned a_index, std::map< TNode, unsigned >& a_exp_proc, 
                              Node ob, Node b, unsigned b_index, std::map< TNode, unsigned >& b_exp_proc, 
                              int status, std::vector< Node >& exp, std::vector< Node >& lem,
                              std::map< int, std::map< Node, std::map< Node, Node > > >& cmp_infers ) {

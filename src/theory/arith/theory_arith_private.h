@@ -83,7 +83,7 @@ namespace inferbounds {
 }
 class InferBoundsResult;
 
-class NlAlg;
+class NonlinearExtension;
 
 /**
  * Implementation of QF_LRA.
@@ -375,8 +375,8 @@ private:
   AttemptSolutionSDP d_attemptSolSimplex;
   
   /** non-linear algebraic approach */
-  NlAlg * d_nla;
-  
+  NonlinearExtension * d_nonlinearExtension;
+
   bool solveRealRelaxation(Theory::Effort effortLevel);
 
   /* Returns true if this is heuristically a good time to try

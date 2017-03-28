@@ -61,7 +61,7 @@
 #include "theory/arith/partial_model.h"
 #include "theory/arith/simplex.h"
 #include "theory/arith/theory_arith.h"
-#include "theory/arith/nl_alg.h"
+#include "theory/arith/nonlinear_extension.h"
 #include "theory/ite_utilities.h"
 #include "theory/quantifiers/bounded_integers.h"
 #include "theory/rewriter.h"
@@ -118,9 +118,7 @@ TheoryArithPrivate::TheoryArithPrivate(TheoryArith& containing, context::Context
   d_fcSimplex(d_linEq, d_errorSet, RaiseConflict(*this), TempVarMalloc(*this)),
   d_soiSimplex(d_linEq, d_errorSet, RaiseConflict(*this), TempVarMalloc(*this)),
   d_attemptSolSimplex(d_linEq, d_errorSet, RaiseConflict(*this), TempVarMalloc(*this)),
-  
-  d_nla( NULL ),
-  
+  d_nonlinearExtension( NULL ),
   d_pass1SDP(NULL),
   d_otherSDP(NULL),
   d_lastContextIntegerAttempted(c,-1),
@@ -148,14 +146,15 @@ TheoryArithPrivate::TheoryArithPrivate(TheoryArith& containing, context::Context
   srand(79);
   
   if( options::nlAlg() ){
-    d_nla = new NlAlg( containing, d_congruenceManager.getEqualityEngine() );
+    d_nonlinearExtension = new NonlinearExtension(
+        containing, d_congruenceManager.getEqualityEngine());
   }
 }
 
 TheoryArithPrivate::~TheoryArithPrivate(){
   if(d_treeLog != NULL){ delete d_treeLog; }
   if(d_approxStats != NULL) { delete d_approxStats; }
-  if(d_nla != NULL) { delete d_nla; }
+  if(d_nonlinearExtension != NULL) { delete d_nonlinearExtension; }
 }
 
 static bool contains(const ConstraintCPVec& v, ConstraintP con){
@@ -3508,17 +3507,17 @@ bool TheoryArithPrivate::hasFreshArithLiteral(Node n) const{
 void TheoryArithPrivate::check(Theory::Effort effortLevel){
   Assert(d_currentPropagationList.empty());
 
-  if(done() && effortLevel<Theory::EFFORT_FULL && ( d_qflraStatus == Result::SAT) ){
+  if(done() && effortLevel < Theory::EFFORT_FULL && ( d_qflraStatus == Result::SAT) ){
     return;
   }
-  
-  if( effortLevel==Theory::EFFORT_LAST_CALL ){
+
+  if(effortLevel == Theory::EFFORT_LAST_CALL){
     if( options::nlAlg() ){
-      d_nla->check( effortLevel );
+      d_nonlinearExtension->check( effortLevel );
     }
     return;
   }
-  
+
   TimerStat::CodeTimer checkTimer(d_containing.d_checkTime);
   //cout << "TheoryArithPrivate::check " << effortLevel << std::endl;
   Debug("effortlevel") << "TheoryArithPrivate::check " << effortLevel << std::endl;
@@ -3830,15 +3829,14 @@ void TheoryArithPrivate::check(Theory::Effort effortLevel){
         outputRestart();
       }
     }
-  }
-  
+  }//if !emmittedConflictOrSplit && fullEffort(effortLevel) && !hasIntegerModel()
+
   if(!emmittedConflictOrSplit && effortLevel>=Theory::EFFORT_FULL){
     if( options::nlAlg() ){
-      d_nla->check( effortLevel );
+      d_nonlinearExtension->check( effortLevel );
     }
   }
-    
-  //if !emmittedConflictOrSplit && fullEffort(effortLevel) && !hasIntegerModel()
+
   if(Theory::fullEffort(effortLevel) && d_nlIncomplete){
     // TODO this is total paranoia
     setIncomplete();
@@ -4016,7 +4014,7 @@ void TheoryArithPrivate::debugPrintModel(std::ostream& out) const{
 
 bool TheoryArithPrivate::needsCheckLastEffort() {
   if( options::nlAlg() ){
-    return d_nla->needsCheckLastEffort();
+    return d_nonlinearExtension->needsCheckLastEffort();
   }else{
     return false;
   }
@@ -4053,7 +4051,7 @@ Node TheoryArithPrivate::explain(TNode n) {
 
 bool TheoryArithPrivate::getCurrentSubstitution( int effort, std::vector< Node >& vars, std::vector< Node >& subs, std::map< Node, std::vector< Node > >& exp ) {
   if( options::nlAlg() ){
-    return d_nla->getCurrentSubstitution( effort, vars, subs, exp );
+    return d_nonlinearExtension->getCurrentSubstitution( effort, vars, subs, exp );
   }else{
     return false;
   }
@@ -4061,7 +4059,7 @@ bool TheoryArithPrivate::getCurrentSubstitution( int effort, std::vector< Node >
 
 bool TheoryArithPrivate::isExtfReduced( int effort, Node n, Node on, std::vector< Node >& exp ) {
   if( options::nlAlg() ){
-    return d_nla->isExtfReduced( effort, n, on, exp );
+    return d_nonlinearExtension->isExtfReduced( effort, n, on, exp );
   }else{
     return false;//d_containing.isExtfReduced( effort, n, on );
   }
@@ -4148,7 +4146,8 @@ DeltaRational TheoryArithPrivate::getDeltaValue(TNode n) const throw (DeltaRatio
     return value;
   }
 
-  case kind::MULT: { // 2+ args
+  case kind::MULT:
+  case kind::NONLINEAR_MULT: { // 2+ args
     DeltaRational value(1);
     unsigned variableParts = 0;
     for(TNode::iterator i = n.begin(), iend = n.end(); i != iend; ++i) {
