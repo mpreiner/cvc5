@@ -35,6 +35,13 @@ namespace arith {
 
 namespace {
 
+// Returns the a[key] and assertion fails in debug mode.
+inline unsigned getCount(const NodeMultiset& a, Node key) {
+  NodeMultiset::const_iterator it = a.find(key);
+  Assert(it != a.end());
+  return it->second;
+}
+
 // Returns the a[key] if it is in a and value otherwise.
 unsigned getCountWithDefault(const NodeMultiset& a, Node key, unsigned value) {
   NodeMultiset::const_iterator it = a.find(key);
@@ -1786,24 +1793,22 @@ void NonlinearExtension::assignOrderIds(std::vector<Node>& vars,
   }
 }
 
-int NonlinearExtension::compare(Node i, Node j, unsigned orderType) {
-  if (orderType >= 0 && orderType <= 3) {
+int NonlinearExtension::compare(Node i, Node j, unsigned orderType) const {
+  Assert(orderType >= 0);
+  if (orderType <= 3) {
     return compare_value(get_compare_value(i, orderType),
                          get_compare_value(j, orderType), orderType);
     // minimal degree
   } else if (orderType == 4) {
-    NodeMultiset::iterator iti = d_m_degree.find(i);
-    Assert(iti != d_m_degree.end());
-    NodeMultiset::iterator itj = d_m_degree.find(j);
-    Assert(itj != d_m_degree.end());
-    return iti->second == itj->second ? 0
-                                      : (iti->second < itj->second ? 1 : -1);
+    unsigned i_count = getCount(d_m_degree, i);
+    unsigned j_count = getCount(d_m_degree, j);
+    return i_count == j_count ? 0 : (i_count < j_count ? 1 : -1);
   } else {
     return 0;
   }
 }
 
-int NonlinearExtension::compare_value(Node i, Node j, unsigned orderType) {
+int NonlinearExtension::compare_value(Node i, Node j, unsigned orderType) const {
   Assert(orderType >= 0 && orderType <= 3);
   Trace("nl-alg-debug") << "compare_value " << i << " " << j
                         << ", o = " << orderType << std::endl;
@@ -1827,13 +1832,12 @@ int NonlinearExtension::compare_value(Node i, Node j, unsigned orderType) {
   return ret;
 }
 
-Node NonlinearExtension::get_compare_value(Node i, unsigned orderType) {
+Node NonlinearExtension::get_compare_value(Node i, unsigned orderType) const {
   Trace("nl-alg-debug") << "Compare variable " << i << " " << orderType
                         << std::endl;
   Assert(orderType >= 0 && orderType <= 3);
-  std::map<Node, Node>::iterator iti;
   unsigned mindex = orderType <= 1 ? 0 : 1;
-  iti = d_mv[mindex].find(i);
+  std::map<Node, Node>::const_iterator iti = d_mv[mindex].find(i);
   Assert(iti != d_mv[mindex].end());
   return iti->second;
 }

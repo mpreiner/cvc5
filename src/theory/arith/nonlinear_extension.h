@@ -52,9 +52,9 @@ class NonlinearExtension {
   std::pair<bool, Node> isExtfReduced(int effort, Node n, Node on,
                                       const std::vector<Node>& exp) const;
   void check(Theory::Effort e);
-  bool needsCheckLastEffort() { return d_needsLastCall; }
-  int compare(Node i, Node j, unsigned orderType);
-  int compare_value(Node i, Node j, unsigned orderType);
+  bool needsCheckLastEffort() const { return d_needsLastCall; }
+  int compare(Node i, Node j, unsigned orderType) const;
+  int compare_value(Node i, Node j, unsigned orderType) const;
 
   bool isMonomialSubset(Node a, Node b) const;
   void registerMonomialSubset(Node a, Node b);
@@ -119,7 +119,7 @@ class NonlinearExtension {
   // index = 0 : concrete, 1 : abstract
   Node computeModelValue(Node n, unsigned index = 0);
 
-  Node get_compare_value(Node i, unsigned orderType);
+  Node get_compare_value(Node i, unsigned orderType) const;
   void assignOrderIds(std::vector<Node>& vars,
                       NodeMultiset& d_order, unsigned orderType);
   // status
@@ -197,6 +197,7 @@ class NonlinearExtension {
   // model values/orderings
   // model values
   std::map<Node, Node> d_mv[2];
+
   // ordering, stores variables and 0,1,-1
   std::map<unsigned, NodeMultiset > d_order_vars;
   std::vector<Node> d_order_points;
