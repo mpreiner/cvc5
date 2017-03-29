@@ -31,10 +31,57 @@ namespace CVC4 {
 namespace theory {
 namespace arith {
 
+namespace {
+
+// Returns the a[key] if it is in a and value otherwise.
+unsigned getCountWithDefault(const NodeMultiset& a, Node key, unsigned value) {
+  NodeMultiset::const_iterator it = a.find(key);
+  return (it == a.end()) ? value : it->second;
+}
+
+// Returns true if for any key then a[key] <= b[key] where the value for any key
+// not present is interpreted as 0.
+bool isSubset(const NodeMultiset& a, const NodeMultiset& b) {
+  for (NodeMultiset::const_iterator it_a = a.begin(); it_a != a.end(); ++it_a) {
+    Node key = it_a->first;
+    const unsigned a_value = it_a->second;
+    const unsigned b_value = getCountWithDefault(b, key, 0);
+    if (a_value > b_value) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Given two multisets return the multiset difference a \ b.
+NodeMultiset diffMultiset(const NodeMultiset& a, const NodeMultiset& b) {
+  NodeMultiset difference;
+  for (NodeMultiset::const_iterator it_a = a.begin(); it_a != a.end(); ++it_a) {
+    Node key = it_a->first;
+    const unsigned a_value = it_a->second;
+    const unsigned b_value = getCountWithDefault(b, key, 0);
+    if (a_value > b_value) {
+      difference[key] = a_value - b_value;
+    }
+  }
+  return difference;
+}
+
+// Return a vector containing a[key] repetitions of key in a multiset a.
+std::vector<Node> ExpandMultiset(const NodeMultiset& a) {
+  std::vector<Node> expansion;
+  for (NodeMultiset::const_iterator it_a = a.begin(); it_a != a.end(); ++it_a) {
+    expansion.insert(expansion.end(), it_a->second, it_a->first);
+  }
+  return expansion;
+}
+
 void debugPrintBound(const char* c, Node coeff, Node x, Kind type, Node rhs) {
   Node t = QuantArith::mkCoeffTerm(coeff, x);
   Trace(c) << t << " " << type << " " << rhs;
 }
+
+}  // namespace
 
 struct sortNonlinearExtension {
   sortNonlinearExtension()
@@ -71,44 +118,53 @@ NonlinearExtension::NonlinearExtension(TheoryArith& containing,
 
 NonlinearExtension::~NonlinearExtension() {}
 
-bool NonlinearExtension::isMonomialSubset(Node a, Node b) {
-  std::map<Node, std::map<TNode, unsigned> >::iterator ita = d_m_exp.find(a);
-  std::map<Node, std::map<TNode, unsigned> >::iterator itb = d_m_exp.find(b);
-  Assert(ita != d_m_exp.end());
-  Assert(itb != d_m_exp.end());
-  for (std::map<TNode, unsigned>::iterator ita2 = ita->second.begin();
-       ita2 != ita->second.end(); ++ita2) {
-    std::map<TNode, unsigned>::iterator itb2 = itb->second.find(ita2->first);
-    if (itb2 == itb->second.end()) {
-      return false;
-    } else if (ita2->second > itb2->second) {
-      return false;
-    }
+// Returns a reference to either map[key] if it exists in the map
+// or to a default value otherwise.
+//
+// Warning: special care must be taken if value is a temporary object.
+template <class MapType, class Key, class Value>
+const Value& FindWithDefault(const MapType& map, const Key& key,
+                             const Value& value) {
+  typename MapType::const_iterator it = map.find(key);
+  if (it == map.end()) {
+    return value;
   }
-  std::vector<Node> diff_children;
-  for (std::map<TNode, unsigned>::iterator itb2 = itb->second.begin();
-       itb2 != itb->second.end(); ++itb2) {
-    std::map<TNode, unsigned>::iterator ita2 = ita->second.find(itb2->first);
-    unsigned diff =
-        itb2->second - (ita2 == ita->second.end() ? 0 : ita2->second);
-    for (unsigned j = 0; j < diff; j++) {
-      diff_children.push_back(itb2->first);
-    }
-  }
+  return it->second;
+}
+
+const NodeMultiset& NonlinearExtension::getMonomialExponentMap(
+    Node monomial) const {
+  MonomialExponentMap::const_iterator it = d_m_exp.find(monomial);
+  Assert(it != d_m_exp.end());
+  return it->second;
+}
+
+bool NonlinearExtension::isMonomialSubset(Node a, Node b) const {
+  const NodeMultiset& a_exponent_map = getMonomialExponentMap(a);
+  const NodeMultiset& b_exponent_map = getMonomialExponentMap(b);
+
+  return isSubset(a_exponent_map, b_exponent_map);
+}
+
+void NonlinearExtension::registerMonomialSubset(Node a, Node b) {
+  Assert(isMonomialSubset(a, b));
+
+  const NodeMultiset& a_exponent_map = getMonomialExponentMap(a);
+  const NodeMultiset& b_exponent_map = getMonomialExponentMap(b);
+
+  std::vector<Node> diff_children =
+      ExpandMultiset(diffMultiset(b_exponent_map, a_exponent_map));
   Assert(!diff_children.empty());
+
   d_m_contain_parent[a].push_back(b);
   d_m_contain_children[b].push_back(a);
-  Node dterm = diff_children.size() == 1 ? diff_children[0]
-                                         : NodeManager::currentNM()->mkNode(
-                                               kind::MULT, diff_children);
-  d_m_contain_mult[a][b] = dterm;
-  d_m_contain_umult[a][b] = diff_children.size() == 1
-                                ? diff_children[0]
-                                : NodeManager::currentNM()->mkNode(
-                                      kind::NONLINEAR_MULT, diff_children);
+
+  Node mult_term = safeConstructNary(kind::MULT, diff_children);
+  Node nlmult_term = safeConstructNary(kind::NONLINEAR_MULT, diff_children);
+  d_m_contain_mult[a][b] = mult_term;
+  d_m_contain_umult[a][b] = nlmult_term;
   Trace("nl-alg-mindex") << "..." << a << " is a subset of " << b
-                         << ", difference is " << dterm << std::endl;
-  return true;
+                         << ", difference is " << mult_term << std::endl;
 }
 
 Node NonlinearExtension::getSubstitutionConst(
@@ -555,7 +611,7 @@ void NonlinearExtension::registerMonomial(Node n) {
 }
 
 void NonlinearExtension::setMonomialFactor(Node a, Node b,
-                                           std::map<TNode, unsigned>& common) {
+                                           NodeMultiset& common) {
   if (d_mono_diff[a].find(b) == d_mono_diff[a].end()) {
     Trace("nl-alg-mono-factor")
         << "Set monomial factor for " << a << "/" << b << std::endl;
@@ -769,18 +825,17 @@ bool NonlinearExtension::hasNewMonomials(Node n, std::vector<Node>& existing,
   return false;
 }
 
-Node NonlinearExtension::mkMonomialRemFactor(
-    Node n, std::map<TNode, unsigned>& n_exp_rem) {
+Node NonlinearExtension::mkMonomialRemFactor(Node n, NodeMultiset& n_exp_rem) {
   std::vector<Node> children;
-  std::map<Node, std::map<TNode, unsigned> >::iterator itme = d_m_exp.find(n);
+  std::map<Node, NodeMultiset>::iterator itme = d_m_exp.find(n);
   Assert(itme != d_m_exp.end());
-  for (std::map<TNode, unsigned>::iterator itme2 = itme->second.begin();
+  for (NodeMultiset::iterator itme2 = itme->second.begin();
        itme2 != itme->second.end(); ++itme2) {
     unsigned inc = itme2->second;
     Node v = itme2->first;
     Trace("nl-alg-mono-factor")
         << "..." << inc << " factors of " << v << std::endl;
-    std::map<TNode, unsigned>::iterator itr = n_exp_rem.find(v);
+    NodeMultiset::iterator itr = n_exp_rem.find(v);
     if (itr != n_exp_rem.end()) {
       Assert(itr->second <= inc);
       inc = inc - itr->second;
@@ -919,7 +974,7 @@ void NonlinearExtension::check(Theory::Effort e) {
         Trace("nl-alg-mv") << "  " << a << " -> " << d_mv[1][a] << " ["
                            << d_mv[0][a] << "]" << std::endl;
 
-        std::map<Node, std::vector<TNode> >::iterator itvl = d_m_vlist.find(a);
+        std::map<Node, std::vector<Node> >::iterator itvl = d_m_vlist.find(a);
         Assert(itvl != d_m_vlist.end());
         for (unsigned k = 0; k < itvl->second.size(); k++) {
           if (std::find(ms_vars.begin(), ms_vars.end(), itvl->second[k]) ==
@@ -929,8 +984,8 @@ void NonlinearExtension::check(Theory::Effort e) {
         }
         /*
         //mark processed if has a "one" factor (will look at reduced monomial)
-        std::map< Node, std::map< TNode, unsigned > >::iterator itme =
-        d_m_exp.find( a ); Assert( itme!=d_m_exp.end() ); for( std::map< TNode,
+        std::map< Node, std::map< Node, unsigned > >::iterator itme =
+        d_m_exp.find( a ); Assert( itme!=d_m_exp.end() ); for( std::map< Node,
         unsigned >::iterator itme2 = itme->second.begin(); itme2 !=
         itme->second.end(); ++itme2 ){ Node v = itme->first; Assert(
         d_mv[0].find( v )!=d_mv[0].end() ); Node mvv = d_mv[0][ v ]; if(
@@ -983,7 +1038,7 @@ void NonlinearExtension::check(Theory::Effort e) {
       }
 
       //------------------------------------------------------------------------lemmas
-      //based on sign (comparison to zero)
+      // based on sign (comparison to zero)
       std::map<Node, int> signs;
       Trace("nl-alg") << "Get sign lemmas..." << std::endl;
       for (unsigned j = 0; j < ms.size(); j++) {
@@ -1007,7 +1062,7 @@ void NonlinearExtension::check(Theory::Effort e) {
       }
 
       //---------------------------------------------------------------------lemmas
-      //based on magnitude of non-zero monomials
+      // based on magnitude of non-zero monomials
       for (unsigned r = 1; r <= 1; r++) {
         assignOrderIds(ms_vars, d_order_vars[r], r);
 
@@ -1031,13 +1086,12 @@ void NonlinearExtension::check(Theory::Effort e) {
               if (c == 0) {
                 // compare magnitude against 1
                 std::vector<Node> exp;
-                std::map<TNode, unsigned> a_exp_proc;
-                std::map<TNode, unsigned> b_exp_proc;
+                NodeMultiset a_exp_proc;
+                NodeMultiset b_exp_proc;
                 compareMonomial(a, a, a_exp_proc, d_one, d_one, b_exp_proc, exp,
                                 lemmas, cmp_infers);
               } else {
-                std::map<Node, std::map<TNode, unsigned> >::iterator itmea =
-                    d_m_exp.find(a);
+                std::map<Node, NodeMultiset>::iterator itmea = d_m_exp.find(a);
                 Assert(itmea != d_m_exp.end());
                 if (c == 1) {
                   // TODO : not just against containing variables?
@@ -1045,8 +1099,8 @@ void NonlinearExtension::check(Theory::Effort e) {
                   for (unsigned k = 0; k < ms_vars.size(); k++) {
                     Node v = ms_vars[k];
                     std::vector<Node> exp;
-                    std::map<TNode, unsigned> a_exp_proc;
-                    std::map<TNode, unsigned> b_exp_proc;
+                    NodeMultiset a_exp_proc;
+                    NodeMultiset b_exp_proc;
                     if (itmea->second.find(v) != itmea->second.end()) {
                       a_exp_proc[v] = 1;
                       b_exp_proc[v] = 1;
@@ -1062,19 +1116,19 @@ void NonlinearExtension::check(Theory::Effort e) {
                     Node b = ms[k];
                     //(signs[a]==signs[b])==(r==0)
                     if (ms_proc.find(b) == ms_proc.end()) {
-                      std::map<Node, std::map<TNode, unsigned> >::iterator
-                          itmeb = d_m_exp.find(b);
+                      std::map<Node, NodeMultiset>::iterator itmeb =
+                          d_m_exp.find(b);
                       Assert(itmeb != d_m_exp.end());
 
                       std::vector<Node> exp;
                       // take common factors of monomials, set minimum of common
                       // exponents as processed
-                      std::map<TNode, unsigned> a_exp_proc;
-                      std::map<TNode, unsigned> b_exp_proc;
-                      for (std::map<TNode, unsigned>::iterator itmea2 =
+                      NodeMultiset a_exp_proc;
+                      NodeMultiset b_exp_proc;
+                      for (NodeMultiset::iterator itmea2 =
                                itmea->second.begin();
                            itmea2 != itmea->second.end(); ++itmea2) {
-                        std::map<TNode, unsigned>::iterator itmeb2 =
+                        NodeMultiset::iterator itmeb2 =
                             itmeb->second.find(itmea2->first);
                         if (itmeb2 != itmeb->second.end()) {
                           unsigned min_exp = itmea2->second > itmeb2->second
@@ -1335,7 +1389,7 @@ void NonlinearExtension::check(Theory::Effort e) {
       }
 
       //-----------------------------------------------------------------------------------------inferred
-      //bounds lemmas, e.g. x >= t => y*x >= y*t
+      // bounds lemmas, e.g. x >= t => y*x >= y*t
       Trace("nl-alg") << "Get inferred bound lemmas..." << std::endl;
 
       std::vector<Node> nt_lemmas;
@@ -1453,7 +1507,7 @@ void NonlinearExtension::check(Theory::Effort e) {
       }
 
       //------------------------------------resolution bound inferences, e.g.  (
-      //y>=0 ^ s <= x*z ^ x*y <= t ) => y*s <= z*t
+      // y>=0 ^ s <= x*z ^ x*y <= t ) => y*s <= z*t
       if (options::nlAlgResBound()) {
         Trace("nl-alg") << "Get resolution inferred bound lemmas..."
                         << std::endl;
@@ -1689,7 +1743,7 @@ void NonlinearExtension::check(Theory::Effort e) {
 }
 
 void NonlinearExtension::assignOrderIds(std::vector<Node>& vars,
-                                        std::map<Node, unsigned>& order,
+                                        NodeMultiset& order,
                                         unsigned orderType) {
   sortNonlinearExtension smv;
   smv.d_nla = this;
@@ -1750,9 +1804,9 @@ int NonlinearExtension::compare(Node i, Node j, unsigned orderType) {
                          get_compare_value(j, orderType), orderType);
     // minimal degree
   } else if (orderType == 4) {
-    std::map<Node, unsigned>::iterator iti = d_m_degree.find(i);
+    NodeMultiset::iterator iti = d_m_degree.find(i);
     Assert(iti != d_m_degree.end());
-    std::map<Node, unsigned>::iterator itj = d_m_degree.find(j);
+    NodeMultiset::iterator itj = d_m_degree.find(j);
     Assert(itj != d_m_degree.end());
     return iti->second == itj->second ? 0
                                       : (iti->second < itj->second ? 1 : -1);
@@ -1838,9 +1892,8 @@ int NonlinearExtension::compareSign(Node oa, Node a, unsigned a_index,
 }
 
 bool NonlinearExtension::compareMonomial(
-    Node oa, Node a, std::map<TNode, unsigned>& a_exp_proc, Node ob, Node b,
-    std::map<TNode, unsigned>& b_exp_proc, std::vector<Node>& exp,
-    std::vector<Node>& lem,
+    Node oa, Node a, NodeMultiset& a_exp_proc, Node ob, Node b,
+    NodeMultiset& b_exp_proc, std::vector<Node>& exp, std::vector<Node>& lem,
     std::map<int, std::map<Node, std::map<Node, Node> > >& cmp_infers) {
   Trace("nl-alg-comp-debug")
       << "Check |" << a << "| >= |" << b << "|" << std::endl;
@@ -1886,9 +1939,9 @@ bool NonlinearExtension::cmp_holds(
 // trying to show a ( >, = ) b   by inequalities between variables in monomials
 // a,b
 bool NonlinearExtension::compareMonomial(
-    Node oa, Node a, unsigned a_index, std::map<TNode, unsigned>& a_exp_proc,
-    Node ob, Node b, unsigned b_index, std::map<TNode, unsigned>& b_exp_proc,
-    int status, std::vector<Node>& exp, std::vector<Node>& lem,
+    Node oa, Node a, unsigned a_index, NodeMultiset& a_exp_proc, Node ob,
+    Node b, unsigned b_index, NodeMultiset& b_exp_proc, int status,
+    std::vector<Node>& exp, std::vector<Node>& lem,
     std::map<int, std::map<Node, std::map<Node, Node> > >& cmp_infers) {
   Trace("nl-alg-comp-debug")
       << "compareMonomial " << oa << " and " << ob << ", indices = " << a_index
@@ -2017,6 +2070,52 @@ bool NonlinearExtension::compareMonomial(
               << "...failure, leading |b|>|a|>1 component." << std::endl;
           return false;
         }
+      }
+    }
+  }
+}
+
+// status 0 : n equal, -1 : n superset, 1 : n subset
+void NonlinearExtension::MonomialIndex::addTerm(Node n, std::vector<Node>& reps,
+                                                NonlinearExtension* nla,
+                                                int status, unsigned argIndex) {
+  if (status == 0) {
+    if (argIndex == reps.size()) {
+      d_monos.push_back(n);
+    } else {
+      d_data[reps[argIndex]].addTerm(n, reps, nla, status, argIndex + 1);
+    }
+  }
+  for (std::map<Node, MonomialIndex>::iterator it = d_data.begin();
+       it != d_data.end(); ++it) {
+    if (status != 0 || argIndex == reps.size() || it->first != reps[argIndex]) {
+      // if we do not contain this variable, then if we were a superset,
+      // fail (-2), otherwise we are subset.  if we do contain this
+      // variable, then if we were equal, we are superset since variables
+      // are ordered, otherwise we remain the same.
+      int new_status =
+          std::find(reps.begin(), reps.end(), it->first) == reps.end()
+              ? (status >= 0 ? 1 : -2)
+              : (status == 0 ? -1 : status);
+      if (new_status != -2) {
+        it->second.addTerm(n, reps, nla, new_status, argIndex);
+      }
+    }
+  }
+  // compare for subsets
+  for (unsigned i = 0; i < d_monos.size(); i++) {
+    Node m = d_monos[i];
+    if (m != n) {
+      // we are superset if we are equal and haven't traversed all variables
+      int cstatus = status == 0 ? (argIndex == reps.size() ? 0 : -1) : status;
+      Trace("nl-alg-mindex-debug") << "  compare " << n << " and " << m
+                                   << ", status = " << cstatus << std::endl;
+      if (cstatus <= 0 && nla->isMonomialSubset(m, n)) {
+        nla->registerMonomialSubset(m, n);
+        Trace("nl-alg-mindex-debug") << "...success" << std::endl;
+      } else if (cstatus >= 0 && nla->isMonomialSubset(n, m)) {
+        nla->registerMonomialSubset(n, m);
+        Trace("nl-alg-mindex-debug") << "...success (rev)" << std::endl;
       }
     }
   }

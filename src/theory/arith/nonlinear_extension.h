@@ -38,6 +38,8 @@ namespace CVC4 {
 namespace theory {
 namespace arith {
 
+typedef std::map<Node, unsigned> NodeMultiset;
+
 class NonlinearExtension {
  public:
   NonlinearExtension(TheoryArith& containing, eq::EqualityEngine* ee);
@@ -50,7 +52,9 @@ class NonlinearExtension {
   bool needsCheckLastEffort() { return d_needsLastCall; }
   int compare(Node i, Node j, unsigned orderType);
   int compare_value(Node i, Node j, unsigned orderType);
-  bool isMonomialSubset(Node a, Node b);
+
+  bool isMonomialSubset(Node a, Node b) const;
+  void registerMonomialSubset(Node a, Node b);
 
  private:
   typedef context::CDHashSet<Node, NodeHashFunction> NodeSet;
@@ -58,52 +62,12 @@ class NonlinearExtension {
   // monomial information (context-independent)
   class MonomialIndex {
    public:
-    std::map<TNode, MonomialIndex> d_data;
-    std::vector<Node> d_monos;
     // status 0 : n equal, -1 : n superset, 1 : n subset
-    void addTerm(TNode n, std::vector<TNode>& reps, NonlinearExtension* nla,
-                 int status = 0, unsigned argIndex = 0) {
-      if (status == 0) {
-        if (argIndex == reps.size()) {
-          d_monos.push_back(n);
-        } else {
-          d_data[reps[argIndex]].addTerm(n, reps, nla, status, argIndex + 1);
-        }
-      }
-      for (std::map<TNode, MonomialIndex>::iterator it = d_data.begin();
-           it != d_data.end(); ++it) {
-        if (status != 0 || argIndex == reps.size() ||
-            it->first != reps[argIndex]) {
-          // if we do not contain this variable, then if we were a superset,
-          // fail (-2), otherwise we are subset.  if we do contain this
-          // variable, then if we were equal, we are superset since variables
-          // are ordered, otherwise we remain the same.
-          int new_status =
-              std::find(reps.begin(), reps.end(), it->first) == reps.end()
-                  ? (status >= 0 ? 1 : -2)
-                  : (status == 0 ? -1 : status);
-          if (new_status != -2) {
-            it->second.addTerm(n, reps, nla, new_status, argIndex);
-          }
-        }
-      }
-      // compare for subsets
-      for (unsigned i = 0; i < d_monos.size(); i++) {
-        Node m = d_monos[i];
-        if (m != n) {
-          // we are superset if we are equal and haven't traversed all variables
-          int cstatus =
-              status == 0 ? (argIndex == reps.size() ? 0 : -1) : status;
-          Trace("nl-alg-mindex-debug") << "  compare " << n << " and " << m
-                                       << ", status = " << cstatus << std::endl;
-          if (cstatus <= 0 && nla->isMonomialSubset(m, n)) {
-            Trace("nl-alg-mindex-debug") << "...success" << std::endl;
-          } else if (cstatus >= 0 && nla->isMonomialSubset(n, m)) {
-            Trace("nl-alg-mindex-debug") << "...success (rev)" << std::endl;
-          }
-        }
-      }
-    }
+    void addTerm(Node n, std::vector<Node>& reps, NonlinearExtension* nla,
+                 int status = 0, unsigned argIndex = 0);
+   private:
+    std::map<Node, MonomialIndex> d_data;
+    std::vector<Node> d_monos;
   }; /* class MonomialIndex */
 
   // constraint information (context-independent)
@@ -142,11 +106,11 @@ class NonlinearExtension {
   Kind transKinds(Kind k1, Kind k2);
   bool hasNewMonomials(Node n, std::vector<Node>& existing,
                        std::map<Node, bool>& visited);
-  Node mkMonomialRemFactor(Node n, std::map<TNode, unsigned>& n_exp_rem);
+  Node mkMonomialRemFactor(Node n, NodeMultiset& n_exp_rem);
 
   // register monomial
   void registerMonomial(Node n);
-  void setMonomialFactor(Node a, Node b, std::map<TNode, unsigned>& common);
+  void setMonomialFactor(Node a, Node b, NodeMultiset& common);
 
   void registerConstraint(Node atom);
   // index = 0 : concrete, 1 : abstract
@@ -154,7 +118,7 @@ class NonlinearExtension {
 
   Node get_compare_value(Node i, unsigned orderType);
   void assignOrderIds(std::vector<Node>& vars,
-                      std::map<Node, unsigned>& d_order, unsigned orderType);
+                      NodeMultiset& d_order, unsigned orderType);
   // status
   // 0 : equal
   // 1 : greater than or equal
@@ -165,13 +129,13 @@ class NonlinearExtension {
   int compareSign(Node oa, Node a, unsigned a_index, int status,
                   std::vector<Node>& exp, std::vector<Node>& lem);
   bool compareMonomial(
-      Node oa, Node a, std::map<TNode, unsigned>& a_exp_proc, Node ob, Node b,
-      std::map<TNode, unsigned>& b_exp_proc, std::vector<Node>& exp,
+      Node oa, Node a, NodeMultiset& a_exp_proc, Node ob, Node b,
+      NodeMultiset& b_exp_proc, std::vector<Node>& exp,
       std::vector<Node>& lem,
       std::map<int, std::map<Node, std::map<Node, Node> > >& cmp_infers);
   bool compareMonomial(
-      Node oa, Node a, unsigned a_index, std::map<TNode, unsigned>& a_exp_proc,
-      Node ob, Node b, unsigned b_index, std::map<TNode, unsigned>& b_exp_proc,
+      Node oa, Node a, unsigned a_index, NodeMultiset& a_exp_proc,
+      Node ob, Node b, unsigned b_index, NodeMultiset& b_exp_proc,
       int status, std::vector<Node>& exp, std::vector<Node>& lem,
       std::map<int, std::map<Node, std::map<Node, Node> > >& cmp_infers);
   bool cmp_holds(Node x, Node y,
@@ -182,9 +146,15 @@ class NonlinearExtension {
   bool flushLemma(Node lem);
   int flushLemmas(std::vector<Node>& lemmas);
 
-  std::map<Node, std::map<TNode, unsigned> > d_m_exp;
-  std::map<Node, std::vector<TNode> > d_m_vlist;
-  std::map<Node, unsigned> d_m_degree;
+  // Returns the NodeMultiset for an existing monomial.
+  const NodeMultiset& getMonomialExponentMap(Node monomial) const;
+
+  // Map from monomials to var^index.
+  typedef std::map<Node, NodeMultiset > MonomialExponentMap;
+  MonomialExponentMap d_m_exp;
+
+  std::map<Node, std::vector<Node> > d_m_vlist;
+  NodeMultiset d_m_degree;
   // monomial index, by sorted variables
   MonomialIndex d_m_index;
   // list of all monomials
@@ -208,7 +178,9 @@ class NonlinearExtension {
   Node d_true;
   Node d_false;
 
+  // The theory of arithmetic containing this extension.
   TheoryArith& d_containing;
+
   // pointer to used equality engine
   eq::EqualityEngine* d_ee;
   // needs last call effort
@@ -223,7 +195,7 @@ class NonlinearExtension {
   // model values
   std::map<Node, Node> d_mv[2];
   // ordering, stores variables and 0,1,-1
-  std::map<unsigned, std::map<Node, unsigned> > d_order_vars;
+  std::map<unsigned, NodeMultiset > d_order_vars;
   std::vector<Node> d_order_points;
 }; /* class NonlinearExtension */
 
