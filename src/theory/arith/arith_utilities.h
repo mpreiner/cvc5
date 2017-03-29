@@ -271,6 +271,28 @@ inline Node safeConstructNary(NodeBuilder<>& nb){
   }
 }
 
+// Returns the multiplication of a and b.
+inline Node mkMult(Node a, Node b) {
+  return NodeManager::currentNM()->mkNode(kind::MULT, a, b);
+}
+
+// Return a constraint that is equivalent to term being is in the range
+// [start, end). This includes start and excludes end.
+inline Node mkInRange(Node term, Node start, Node end) {
+  NodeManager* nm = NodeManager::currentNM();
+  Node above_start = nm->mkNode(kind::LEQ, start, term);
+  Node below_end = nm->mkNode(kind::LT, term, end);
+  return nm->mkNode(kind::AND, above_start, below_end);
+}
+
+// Creates an expression that constrains q to be equal to one of two expressions
+// when n is 0 or not. Useful for division by 0 logic.
+//   (ite (= n 0) (= q if_zero) (= q not_zero))
+inline Node mkOnZeroIte(Node n, Node q, Node if_zero, Node not_zero) {
+  Node zero = mkRationalNode(0);
+  return n.eqNode(zero).iteNode(q.eqNode(if_zero), q.eqNode(not_zero));
+}
+
 }/* CVC4::theory::arith namespace */
 }/* CVC4::theory namespace */
 }/* CVC4 namespace */
