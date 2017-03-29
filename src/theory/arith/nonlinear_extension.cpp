@@ -17,6 +17,8 @@
 
 #include "theory/arith/nonlinear_extension.h"
 
+#include <set>
+
 #include "expr/node_builder.h"
 #include "options/arith_options.h"
 #include "theory/arith/arith_utilities.h"
@@ -202,7 +204,7 @@ Node NonlinearExtension::getSubstitutionConst(
 void NonlinearExtension::setSubstitutionConst(
     Node r, Node r_c, Node r_cb, std::vector<Node>& r_c_exp,
     std::map<Node, std::vector<int> >& rep_to_subs_index,
-    std::vector<Node>& vars, std::vector<Node>& subs,
+    const std::vector<Node>& vars, std::vector<Node>& subs,
     std::map<Node, std::vector<Node> >& exp, bool& retVal,
     std::map<Node, std::vector<Node> > reps_to_terms,
     std::map<Node, int>& term_to_nconst_rep_count,
@@ -348,7 +350,7 @@ void NonlinearExtension::setSubstitutionConst(
 }
 
 bool NonlinearExtension::getCurrentSubstitution(
-    int effort, std::vector<Node>& vars, std::vector<Node>& subs,
+    int effort, const std::vector<Node>& vars, std::vector<Node>& subs,
     std::map<Node, std::vector<Node> >& exp) {
   // get the constant equivalence classes
   std::map<Node, std::vector<int> > rep_to_subs_index;
@@ -477,53 +479,39 @@ bool NonlinearExtension::getCurrentSubstitution(
   // d_containing.getValuation().getModel()->getRepresentative( n );
 }
 
-bool NonlinearExtension::isExtfReduced(int effort, Node n, Node on,
-                                       std::vector<Node>& exp) {
-  /*
-    if( n.isConst() ){
-      return true;
-    }else{
-      return false;
-    }
-  */
-  if (n == d_zero) {
-    Trace("nl-alg-zero-exp")
-        << "Infer zero : " << on << " == " << n << std::endl;
-    // minimize explanation
-    std::map<Node, bool> vars;
-    for (unsigned i = 0; i < on.getNumChildren(); i++) {
-      vars[on[i]] = true;
-    }
-    for (unsigned i = 0; i < exp.size(); i++) {
-      Trace("nl-alg-zero-exp")
-          << "  exp[" << i << "] = " << exp[i] << std::endl;
-      std::vector<Node> eqs;
-      if (exp[i].getKind() == kind::EQUAL) {
-        eqs.push_back(exp[i]);
-      } else if (exp[i].getKind() == kind::AND) {
-        for (unsigned j = 0; j < exp[i].getNumChildren(); j++) {
-          if (exp[i][j].getKind() == kind::EQUAL) {
-            eqs.push_back(exp[i][j]);
-          }
+std::pair<bool, Node> NonlinearExtension::isExtfReduced(
+    int effort, Node n, Node on, const std::vector<Node>& exp) const {
+  if (n != d_zero) {
+    return std::make_pair(n.getKind() != kind::NONLINEAR_MULT, Node::null());
+  }
+  Assert(n == d_zero);
+  Trace("nl-alg-zero-exp") << "Infer zero : " << on << " == " << n << std::endl;
+  // minimize explanation
+  const std::set<Node> vars(on.begin(), on.end());
+
+  for (unsigned i = 0; i < exp.size(); i++) {
+    Trace("nl-alg-zero-exp") << "  exp[" << i << "] = " << exp[i] << std::endl;
+    std::vector<Node> eqs;
+    if (exp[i].getKind() == kind::EQUAL) {
+      eqs.push_back(exp[i]);
+    } else if (exp[i].getKind() == kind::AND) {
+      for (unsigned j = 0; j < exp[i].getNumChildren(); j++) {
+        if (exp[i][j].getKind() == kind::EQUAL) {
+          eqs.push_back(exp[i][j]);
         }
       }
+    }
 
-      for (unsigned j = 0; j < eqs.size(); j++) {
-        for (unsigned r = 0; r < 2; r++) {
-          if (eqs[j][r] == d_zero && vars.find(eqs[j][1 - r]) != vars.end()) {
-            Trace("nl-alg-zero-exp")
-                << "...single exp : " << eqs[j] << std::endl;
-            exp.clear();
-            exp.push_back(eqs[j]);
-            return true;
-          }
+    for (unsigned j = 0; j < eqs.size(); j++) {
+      for (unsigned r = 0; r < 2; r++) {
+        if (eqs[j][r] == d_zero && vars.find(eqs[j][1 - r]) != vars.end()) {
+          Trace("nl-alg-zero-exp") << "...single exp : " << eqs[j] << std::endl;
+          return std::make_pair(true, eqs[j]);
         }
       }
     }
   }
-
-  // return n!=on;
-  return n.getKind() != kind::NONLINEAR_MULT;
+  return std::make_pair(true, Node::null());
 }
 
 Node NonlinearExtension::computeModelValue(Node n, unsigned index) {

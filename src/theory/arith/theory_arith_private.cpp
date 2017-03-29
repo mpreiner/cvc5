@@ -4192,11 +4192,18 @@ bool TheoryArithPrivate::getCurrentSubstitution( int effort, std::vector< Node >
   }
 }
 
-bool TheoryArithPrivate::isExtfReduced( int effort, Node n, Node on, std::vector< Node >& exp ) {
-  if( options::nlAlg() ){
-    return d_nonlinearExtension->isExtfReduced( effort, n, on, exp );
-  }else{
-    return false;//d_containing.isExtfReduced( effort, n, on );
+bool TheoryArithPrivate::isExtfReduced(int effort, Node n, Node on,
+                                       std::vector<Node>& exp) {
+  if (options::nlAlg()) {
+    std::pair<bool, Node> reduced =
+        d_nonlinearExtension->isExtfReduced(effort, n, on, exp);
+    if (!reduced.second.isNull()) {
+      exp.clear();
+      exp.push_back(reduced.second);
+    }
+    return reduced.first;
+  } else {
+    return false;  // d_containing.isExtfReduced( effort, n, on );
   }
 }
 

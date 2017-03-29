@@ -23,6 +23,7 @@
 #include <map>
 #include <queue>
 #include <vector>
+#include <utility>
 
 #include "context/cdhashset.h"
 #include "context/cdinsert_hashmap.h"
@@ -44,10 +45,12 @@ class NonlinearExtension {
  public:
   NonlinearExtension(TheoryArith& containing, eq::EqualityEngine* ee);
   ~NonlinearExtension();
-  bool getCurrentSubstitution(int effort, std::vector<Node>& vars,
+  bool getCurrentSubstitution(int effort, const std::vector<Node>& vars,
                               std::vector<Node>& subs,
                               std::map<Node, std::vector<Node> >& exp);
-  bool isExtfReduced(int effort, Node n, Node on, std::vector<Node>& exp);
+
+  std::pair<bool, Node> isExtfReduced(int effort, Node n, Node on,
+                                      const std::vector<Node>& exp) const;
   void check(Theory::Effort e);
   bool needsCheckLastEffort() { return d_needsLastCall; }
   int compare(Node i, Node j, unsigned orderType);
@@ -87,7 +90,7 @@ class NonlinearExtension {
   void setSubstitutionConst(
       Node r, Node r_c, Node r_cb, std::vector<Node>& r_c_exp,
       std::map<Node, std::vector<int> >& rep_to_subs_index,
-      std::vector<Node>& vars, std::vector<Node>& subs,
+      const std::vector<Node>& vars, std::vector<Node>& subs,
       std::map<Node, std::vector<Node> >& exp, bool& retVal,
       std::map<Node, std::vector<Node> > reps_to_terms,
       std::map<Node, int>& term_to_nconst_rep_count,
