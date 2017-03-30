@@ -35,6 +35,19 @@ namespace arith {
 
 namespace {
 
+// Return true if a collection c contains an elem k. Compatible with map and set
+// containers.
+template <class Container, class Key>
+bool Contains(const Container& c, const Key& k) {
+  return c.find(k) != c.end();
+}
+
+// Returns true if a vector c contains an elem t.
+template <class T>
+bool IsInVector(const std::vector<T>& c, const T& t) {
+  return std::find(c.begin(), c.end(), t) != c.end();
+}
+
 // Returns the a[key] and assertion fails in debug mode.
 inline unsigned getCount(const NodeMultiset& a, Node key) {
   NodeMultiset::const_iterator it = a.find(key);
@@ -42,10 +55,16 @@ inline unsigned getCount(const NodeMultiset& a, Node key) {
   return it->second;
 }
 
-// Returns the a[key] if it is in a and value otherwise.
+// Returns a[key] if key is in a or value otherwise.
 unsigned getCountWithDefault(const NodeMultiset& a, Node key, unsigned value) {
   NodeMultiset::const_iterator it = a.find(key);
   return (it == a.end()) ? value : it->second;
+}
+
+// Returns map[key] if key is in map or Node::null() otherwise.
+Node getNodeOrNull(const std::map<Node, Node>& map, Node key) {
+  std::map<Node, Node>::const_iterator it = map.find(key);
+  return (it == map.end()) ? Node::null() : it->second;
 }
 
 // Returns true if for any key then a[key] <= b[key] where the value for any key
@@ -90,10 +109,61 @@ void debugPrintBound(const char* c, Node coeff, Node x, Kind type, Node rhs) {
   Trace(c) << t << " " << type << " " << rhs;
 }
 
-}  // namespace
+struct SubstitutionConstResult {
+  // The resulting term of the substitution.
+  Node term;
 
-struct sortNonlinearExtension {
-  sortNonlinearExtension()
+  // ?
+  std::vector<Node> const_exp;
+
+  // ??
+  // A term sum[i] for which for rep_sum[i] not in rep_to_const.
+  Node variable_term;
+}; /* struct SubstitutionConstResult */
+
+SubstitutionConstResult getSubstitutionConst(
+    Node n, const std::vector<Node>& sum, const std::vector<Node>& rep_sum,
+    const std::map<Node, Node>& rep_to_const,
+    const std::map<Node, Node>& rep_to_const_exp,
+    const std::map<Node, Node>& rep_to_const_base) {
+  Assert(sum.size() == rep_sum.size());
+
+  SubstitutionConstResult result;
+
+  std::vector<Node> vars;
+  std::vector<Node> subs;
+  std::set<Node> rep_exp_proc;
+  for (unsigned i = 0; i < rep_sum.size(); i++) {
+    Node cr = rep_sum[i];
+    Node const_of_cr = getNodeOrNull(rep_to_const, cr);
+    if (const_of_cr.isNull()) {
+      result.variable_term = sum[i];
+      continue;
+    }
+    Assert(!const_of_cr.isNull());
+    Node const_base_of_cr = getNodeOrNull(rep_to_const_base, cr);
+    Assert(!const_base_of_cr.isNull());
+    if (const_base_of_cr != sum[i]) {
+      result.const_exp.push_back(const_base_of_cr.eqNode(sum[i]));
+    }
+    if (rep_exp_proc.find(cr) == rep_exp_proc.end()) {
+      rep_exp_proc.insert(cr);
+      Node const_exp = getNodeOrNull(rep_to_const_exp, cr);
+      if (!const_exp.isNull()) {
+        result.const_exp.push_back(const_exp);
+      }
+    }
+    vars.push_back(sum[i]);
+    subs.push_back(const_of_cr);
+  }
+  Node substituted =
+      n.substitute(vars.begin(), vars.end(), subs.begin(), subs.end());
+  result.term = Rewriter::rewrite(substituted);
+  return result;
+}
+
+struct SortNonlinearExtension {
+  SortNonlinearExtension()
       : d_nla(NULL), d_order_type(0), d_reverse_order(false) {}
   NonlinearExtension* d_nla;
   unsigned d_order_type;
@@ -107,6 +177,8 @@ struct sortNonlinearExtension {
     }
   }
 };
+
+}  // namespace
 
 NonlinearExtension::NonlinearExtension(TheoryArith& containing,
                                        eq::EqualityEngine* ee)
@@ -176,80 +248,177 @@ void NonlinearExtension::registerMonomialSubset(Node a, Node b) {
                          << ", difference is " << mult_term << std::endl;
 }
 
-Node NonlinearExtension::getSubstitutionConst(
-    Node n, std::vector<Node>& sum, std::vector<Node>& rep_sum, Node& v,
-    std::map<Node, Node>& rep_to_const, std::map<Node, Node>& rep_to_const_exp,
-    std::map<Node, Node>& rep_to_const_base, std::vector<Node>& r_c_exp) {
-  std::vector<Node> vars;
-  std::vector<Node> subs;
-  std::map<Node, bool> rep_exp_proc;
-  for (unsigned i = 0; i < rep_sum.size(); i++) {
-    Node cr = rep_sum[i];
-    std::map<Node, Node>::iterator it = rep_to_const.find(cr);
-    if (it != rep_to_const.end()) {
-      if (rep_to_const_base[cr] != sum[i]) {
-        r_c_exp.push_back(rep_to_const_base[cr].eqNode(sum[i]));
+class NonLinearExtentionSubstitutionSolver {
+ public:
+  NonLinearExtentionSubstitutionSolver(const eq::EqualityEngine* ee)
+      : d_ee(ee) {}
+
+  bool solve(const std::vector<Node>& vars, std::vector<Node>* subs,
+             std::map<Node, std::vector<Node> >* exp,
+             std::map<Node, std::vector<int> >* rep_to_subs_index);
+
+ private:
+  bool setSubstitutionConst(
+      const std::vector<Node>& vars, Node r, Node r_c, Node r_cb,
+      const std::vector<Node>& r_c_exp, std::vector<Node>* subs,
+      std::map<Node, std::vector<Node> >* exp,
+      std::map<Node, std::vector<int> >* rep_to_subs_index);
+
+  const eq::EqualityEngine* d_ee;
+
+  std::map<Node, Node> d_rep_to_const;
+  std::map<Node, Node> d_rep_to_const_exp;
+  std::map<Node, Node> d_rep_to_const_base;
+
+  // key in term_to_sum iff key in term_to_rep_sum.
+  std::map<Node, std::vector<Node> > d_term_to_sum;
+  std::map<Node, std::vector<Node> > d_term_to_rep_sum;
+  std::map<Node, int> d_term_to_nconst_rep_count;
+
+  std::map<Node, std::vector<Node> > d_reps_to_parent_terms;
+  std::map<Node, std::vector<Node> > d_reps_to_terms;
+};
+
+bool NonLinearExtentionSubstitutionSolver::solve(
+    const std::vector<Node>& vars, std::vector<Node>* subs,
+    std::map<Node, std::vector<Node> >* exp,
+    std::map<Node, std::vector<int> >* rep_to_subs_index) {
+  // std::map<Node, Node> rep_to_const;
+  // std::map<Node, Node> rep_to_const_exp;
+  // std::map<Node, Node> rep_to_const_base;
+
+  // std::map<Node, std::vector<Node> > term_to_sum;
+  // std::map<Node, std::vector<Node> > term_to_rep_sum;
+  // std::map<Node, int> term_to_nconst_rep_count;
+  // std::map<Node, std::vector<Node> > reps_to_parent_terms;
+  // std::map<Node, std::vector<Node> > reps_to_terms;
+  eq::EqClassesIterator eqcs_i = eq::EqClassesIterator(d_ee);
+
+  bool retVal = false;
+  while (!eqcs_i.isFinished() && !rep_to_subs_index->empty()) {
+    Node r = (*eqcs_i);
+    if (r.getType().isReal()) {
+      Trace("nl-subs-debug")
+          << "Process equivalence class " << r << "..." << std::endl;
+      Node r_c;
+      Node r_cb;
+      std::vector<Node> r_c_exp;
+      if (r.isConst()) {
+        r_c = r;
+        r_cb = r;
       }
-      if (rep_exp_proc.find(cr) == rep_exp_proc.end()) {
-        rep_exp_proc[cr] = true;
-        std::map<Node, Node>::iterator itx = rep_to_const_exp.find(cr);
-        if (itx != rep_to_const_exp.end()) {
-          r_c_exp.push_back(itx->second);
+      // scan the class
+      eq::EqClassIterator eqc_i = eq::EqClassIterator(r, d_ee);
+      while (!eqc_i.isFinished()) {
+        Node n = (*eqc_i);
+        if (!n.isConst()) {
+          Trace("nl-subs-debug") << "Look at term : " << n << std::endl;
+          std::map<Node, Node> msum;
+          if (QuantArith::getMonomialSum(n, msum)) {
+            int nconst_count = 0;
+            bool evaluatable = true;
+            for (std::map<Node, Node>::iterator itm = msum.begin();
+                 itm != msum.end(); ++itm) {
+              if (!itm->first.isNull()) {
+                if (d_ee->hasTerm(itm->first)) {
+                  Trace("nl-subs-debug")
+                      << "      ...monomial " << itm->first << std::endl;
+                  Node cr = d_ee->getRepresentative(itm->first);
+                  d_term_to_sum[n].push_back(itm->first);
+                  d_term_to_rep_sum[n].push_back(cr);
+                  if (!Contains(d_rep_to_const, cr)) {
+                    if (!IsInVector(d_reps_to_parent_terms[cr], n)) {
+                      d_reps_to_parent_terms[cr].push_back(n);
+                      nconst_count++;
+                    }
+                  }
+                } else {
+                  Trace("nl-subs-debug")
+                      << "...is not evaluatable due to monomial " << itm->first
+                      << std::endl;
+                  evaluatable = false;
+                  break;
+                }
+              }
+            }
+            if (evaluatable) {
+              Trace("nl-subs-debug")
+                  << "  ...term has " << nconst_count
+                  << " unique non-constant represenative children."
+                  << std::endl;
+              if (nconst_count == 0) {
+                if (r_c.isNull()) {
+                  const SubstitutionConstResult result = getSubstitutionConst(
+                      n, d_term_to_sum[n], d_term_to_rep_sum[n], d_rep_to_const,
+                      d_rep_to_const_exp, d_rep_to_const_base);
+                  r_c_exp.insert(r_c_exp.end(), result.const_exp.begin(),
+                                 result.const_exp.end());
+                  r_c = result.term;
+                  r_cb = n;
+                  Assert(result.variable_term.isNull());
+                  Assert(r_c.isConst());
+                }
+              } else {
+                d_reps_to_terms[r].push_back(n);
+                d_term_to_nconst_rep_count[n] = nconst_count;
+              }
+            }
+          } else {
+            Trace("nl-subs-debug")
+                << "...could not get monomial sum " << std::endl;
+          }
         }
+        ++eqc_i;
       }
-      vars.push_back(sum[i]);
-      subs.push_back(it->second);
-    } else {
-      v = sum[i];
+      if (!r_c.isNull()) {
+        setSubstitutionConst(vars, r, r_c, r_cb, r_c_exp, subs, exp,
+                             rep_to_subs_index);
+      }
     }
+    ++eqcs_i;
   }
-  Node ns = n.substitute(vars.begin(), vars.end(), subs.begin(), subs.end());
-  ns = Rewriter::rewrite(ns);
-  return ns;
+  return retVal;
 }
 
-void NonlinearExtension::setSubstitutionConst(
-    Node r, Node r_c, Node r_cb, std::vector<Node>& r_c_exp,
-    std::map<Node, std::vector<int> >& rep_to_subs_index,
-    const std::vector<Node>& vars, std::vector<Node>& subs,
-    std::map<Node, std::vector<Node> >& exp, bool& retVal,
-    std::map<Node, std::vector<Node> > reps_to_terms,
-    std::map<Node, int>& term_to_nconst_rep_count,
-    std::map<Node, std::vector<Node> > reps_to_parent_terms,
-    std::map<Node, std::vector<Node> > term_to_sum,
-    std::map<Node, std::vector<Node> > term_to_rep_sum,
-    std::map<Node, Node>& rep_to_const, std::map<Node, Node>& rep_to_const_exp,
-    std::map<Node, Node>& rep_to_const_base) {
+bool NonLinearExtentionSubstitutionSolver::setSubstitutionConst(
+    const std::vector<Node>& vars, Node r, Node r_c, Node r_cb,
+    const std::vector<Node>& r_c_exp, std::vector<Node>* subs,
+    std::map<Node, std::vector<Node> >* exp,
+    std::map<Node, std::vector<int> >* rep_to_subs_index) {
   Trace("nl-subs-debug") << "Set constant equivalence class : " << r << " -> "
                          << r_c << std::endl;
-  rep_to_const[r] = r_c;
+  bool retVal = false;
+
+  d_rep_to_const[r] = r_c;
   Node expn;
   if (!r_c_exp.empty()) {
     expn = r_c_exp.size() == 1
                ? r_c_exp[0]
                : NodeManager::currentNM()->mkNode(kind::AND, r_c_exp);
     Trace("nl-subs-debug") << "...explanation is " << expn << std::endl;
-    rep_to_const_exp[r] = expn;
+    d_rep_to_const_exp[r] = expn;
   }
-  rep_to_const_base[r] = r_cb;
+  d_rep_to_const_base[r] = r_cb;
 
-  std::map<Node, std::vector<int> >::iterator iti = rep_to_subs_index.find(r);
-  if (iti != rep_to_subs_index.end()) {
+  std::map<Node, std::vector<int> >::const_iterator iti =
+      rep_to_subs_index->find(r);
+  if (iti != rep_to_subs_index->end()) {
     for (unsigned i = 0; i < iti->second.size(); i++) {
       int ii = iti->second[i];
-      subs[ii] = r_c;
-      exp[vars[ii]].clear();
+      (*subs)[ii] = r_c;
+      std::vector<Node>& exp_var_ii = (*exp)[vars[ii]];
+      exp_var_ii.clear();
       if (!expn.isNull()) {
-        exp[vars[ii]].push_back(expn);
+        exp_var_ii.push_back(expn);
       }
       if (vars[ii] != r_cb) {
-        exp[vars[ii]].push_back(vars[ii].eqNode(r_cb));
+        exp_var_ii.push_back(vars[ii].eqNode(r_cb));
       }
     }
     retVal = true;
-    rep_to_subs_index.erase(r);
-    if (rep_to_subs_index.empty()) {
-      return;
+    rep_to_subs_index->erase(r);
+    if (rep_to_subs_index->empty()) {
+      return retVal;
     }
   }
 
@@ -258,51 +427,53 @@ void NonlinearExtension::setSubstitutionConst(
   std::map<Node, std::vector<Node> > new_const_exp;
 
   // parent terms now evaluate to constants
-  std::map<Node, std::vector<Node> >::iterator itrp =
-      reps_to_parent_terms.find(r);
-  if (itrp != reps_to_parent_terms.end()) {
+  std::map<Node, std::vector<Node> >::const_iterator itrp =
+      d_reps_to_parent_terms.find(r);
+  if (itrp != d_reps_to_parent_terms.end()) {
     // Trace("nl-subs-debug") << "Look at " << itrp->second.size() << " parent
     // terms." << std::endl;
     for (unsigned i = 0; i < itrp->second.size(); i++) {
       Node m = itrp->second[i];
-      term_to_nconst_rep_count[m]--;
+      d_term_to_nconst_rep_count[m]--;
       Node r = d_ee->getRepresentative(m);
-      if (term_to_nconst_rep_count[m] == 0) {
-        if (rep_to_const.find(r) == rep_to_const.end()) {
+      if (d_term_to_nconst_rep_count[m] == 0) {
+        if (!Contains(d_rep_to_const, r)) {
           Trace("nl-subs-debug") << "...parent term " << m
                                  << " evaluates to constant." << std::endl;
-          if (new_const.find(m) == new_const.end()) {
-            Node v;
-            Node m_c = getSubstitutionConst(
-                m, term_to_sum[m], term_to_rep_sum[m], v, rep_to_const,
-                rep_to_const_exp, rep_to_const_base, new_const_exp[m]);
+          if (!Contains(new_const, m)) {
+            const SubstitutionConstResult result = getSubstitutionConst(
+                m, d_term_to_sum[m], d_term_to_rep_sum[m], d_rep_to_const,
+                d_rep_to_const_exp, d_rep_to_const_base);
+            new_const_exp[m].insert(new_const_exp[m].end(),
+                                    result.const_exp.begin(),
+                                    result.const_exp.end());
+            Node m_c = result.term;
             // count should be accurate
-            Assert(v.isNull());
+            Assert(result.variable_term.isNull());
             Assert(m_c.isConst());
             new_const[m] = m_c;
           }
         }
-      } else if (term_to_nconst_rep_count[m] == 1) {
+      } else if (d_term_to_nconst_rep_count[m] == 1) {
         // check if it is now univariate solved
-        std::map<Node, Node>::iterator itr = rep_to_const.find(r);
-        if (itr != rep_to_const.end()) {
+        if (Contains(d_rep_to_const, r)) {
           Trace("nl-subs-debug") << "...parent term " << m
                                  << " is univariate solved." << std::endl;
-          std::vector<Node> const_exp;
-          Node v;
-          Node m_t = getSubstitutionConst(m, term_to_sum[m], term_to_rep_sum[m],
-                                          v, rep_to_const, rep_to_const_exp,
-                                          rep_to_const_base, const_exp);
-          Node eq = m_t.eqNode(itr->second);
-          Node v_c = QuantArith::solveEqualityFor(eq, v);
+          const SubstitutionConstResult result = getSubstitutionConst(
+              m, d_term_to_sum[m], d_term_to_rep_sum[m], d_rep_to_const,
+              d_rep_to_const_exp, d_rep_to_const_base);
+          Node eq = (result.term).eqNode(d_rep_to_const[r]);
+          Node v_c = QuantArith::solveEqualityFor(eq, result.variable_term);
           if (!v_c.isNull()) {
             Assert(v_c.isConst());
-            if (new_const.find(v) == new_const.end()) {
-              new_const[v] = v_c;
-              new_const_exp[v].insert(new_const_exp[v].end(), const_exp.begin(),
-                                      const_exp.end());
-              if (m != rep_to_const_base[r]) {
-                new_const_exp[v].push_back(m.eqNode(rep_to_const_base[r]));
+            if (Contains(new_const, result.variable_term)) {
+              new_const[result.variable_term] = v_c;
+              std::vector<Node>& explanation =
+                  new_const_exp[result.variable_term];
+              explanation.insert(explanation.end(), result.const_exp.begin(),
+                                 result.const_exp.end());
+              if (m != d_rep_to_const_base[r]) {
+                explanation.push_back(m.eqNode(d_rep_to_const_base[r]));
               }
             }
           }
@@ -312,26 +483,27 @@ void NonlinearExtension::setSubstitutionConst(
   }
 
   // equal univariate terms now solved
-  std::map<Node, std::vector<Node> >::iterator itt = reps_to_terms.find(r);
-  if (itt != reps_to_terms.end()) {
+  std::map<Node, std::vector<Node> >::iterator itt = d_reps_to_terms.find(r);
+  if (itt != d_reps_to_terms.end()) {
     for (unsigned i = 0; i < itt->second.size(); i++) {
       Node m = itt->second[i];
-      if (term_to_nconst_rep_count[m] == 1) {
+      if (d_term_to_nconst_rep_count[m] == 1) {
         Trace("nl-subs-debug")
             << "...term " << m << " is univariate solved." << std::endl;
-        std::vector<Node> const_exp;
-        Node v;
-        Node m_t = getSubstitutionConst(m, term_to_sum[m], term_to_rep_sum[m],
-                                        v, rep_to_const, rep_to_const_exp,
-                                        rep_to_const_base, const_exp);
+        const SubstitutionConstResult result = getSubstitutionConst(
+            m, d_term_to_sum[m], d_term_to_rep_sum[m], d_rep_to_const,
+            d_rep_to_const_exp, d_rep_to_const_base);
+        Node v = result.variable_term;
+        Node m_t = result.term;
         Node eq = m_t.eqNode(r_c);
         Node v_c = QuantArith::solveEqualityFor(eq, v);
         if (!v_c.isNull()) {
           Assert(v_c.isConst());
           if (new_const.find(v) == new_const.end()) {
             new_const[v] = v_c;
-            new_const_exp[v].insert(new_const_exp[v].end(), const_exp.begin(),
-                                    const_exp.end());
+            new_const_exp[v].insert(new_const_exp[v].end(),
+                                    result.const_exp.begin(),
+                                    result.const_exp.end());
             if (m != r_cb) {
               new_const_exp[v].push_back(m.eqNode(r_cb));
             }
@@ -346,14 +518,14 @@ void NonlinearExtension::setSubstitutionConst(
        itn != new_const.end(); ++itn) {
     Node m = itn->first;
     Node r = d_ee->getRepresentative(m);
-    if (rep_to_const.find(r) == rep_to_const.end()) {
-      setSubstitutionConst(r, itn->second, m, new_const_exp[m],
-                           rep_to_subs_index, vars, subs, exp, retVal,
-                           reps_to_terms, term_to_nconst_rep_count,
-                           reps_to_parent_terms, term_to_sum, term_to_rep_sum,
-                           rep_to_const, rep_to_const_exp, rep_to_const_base);
+    if (!Contains(d_rep_to_const, r)) {
+      if (setSubstitutionConst(vars, r, itn->second, m, new_const_exp[m],
+                               subs, exp, rep_to_subs_index)) {
+        retVal = true;
+      }
     }
   }
+  return retVal;
 }
 
 bool NonlinearExtension::getCurrentSubstitution(
@@ -383,100 +555,10 @@ bool NonlinearExtension::getCurrentSubstitution(
   }
 
   if (options::nlAlgSolveSubs()) {
-    std::map<Node, Node> rep_to_const;
-    std::map<Node, Node> rep_to_const_exp;
-    std::map<Node, Node> rep_to_const_base;
-
-    std::map<Node, std::vector<Node> > term_to_sum;
-    std::map<Node, std::vector<Node> > term_to_rep_sum;
-    std::map<Node, int> term_to_nconst_rep_count;
-    std::map<Node, std::vector<Node> > reps_to_parent_terms;
-    std::map<Node, std::vector<Node> > reps_to_terms;
-    eq::EqClassesIterator eqcs_i = eq::EqClassesIterator(d_ee);
-    while (!eqcs_i.isFinished() && !rep_to_subs_index.empty()) {
-      Node r = (*eqcs_i);
-      if (r.getType().isReal()) {
-        Trace("nl-subs-debug")
-            << "Process equivalence class " << r << "..." << std::endl;
-        Node r_c;
-        Node r_cb;
-        std::vector<Node> r_c_exp;
-        if (r.isConst()) {
-          r_c = r;
-          r_cb = r;
-        }
-        // scan the class
-        eq::EqClassIterator eqc_i = eq::EqClassIterator(r, d_ee);
-        while (!eqc_i.isFinished()) {
-          Node n = (*eqc_i);
-          if (!n.isConst()) {
-            Trace("nl-subs-debug") << "Look at term : " << n << std::endl;
-            std::map<Node, Node> msum;
-            if (QuantArith::getMonomialSum(n, msum)) {
-              int nconst_count = 0;
-              bool evaluatable = true;
-              for (std::map<Node, Node>::iterator itm = msum.begin();
-                   itm != msum.end(); ++itm) {
-                if (!itm->first.isNull()) {
-                  if (d_ee->hasTerm(itm->first)) {
-                    Trace("nl-subs-debug")
-                        << "      ...monomial " << itm->first << std::endl;
-                    Node cr = d_ee->getRepresentative(itm->first);
-                    term_to_sum[n].push_back(itm->first);
-                    term_to_rep_sum[n].push_back(cr);
-                    if (rep_to_const.find(cr) == rep_to_const.end()) {
-                      if (std::find(reps_to_parent_terms[cr].begin(),
-                                    reps_to_parent_terms[cr].end(),
-                                    n) == reps_to_parent_terms[cr].end()) {
-                        reps_to_parent_terms[cr].push_back(n);
-                        nconst_count++;
-                      }
-                    }
-                  } else {
-                    Trace("nl-subs-debug")
-                        << "...is not evaluatable due to monomial "
-                        << itm->first << std::endl;
-                    evaluatable = false;
-                    break;
-                  }
-                }
-              }
-              if (evaluatable) {
-                Trace("nl-subs-debug")
-                    << "  ...term has " << nconst_count
-                    << " unique non-constant represenative children."
-                    << std::endl;
-                if (nconst_count == 0) {
-                  if (r_c.isNull()) {
-                    Node v;
-                    r_c = getSubstitutionConst(
-                        n, term_to_sum[n], term_to_rep_sum[n], v, rep_to_const,
-                        rep_to_const_exp, rep_to_const_base, r_c_exp);
-                    r_cb = n;
-                    Assert(v.isNull());
-                    Assert(r_c.isConst());
-                  }
-                } else {
-                  reps_to_terms[r].push_back(n);
-                  term_to_nconst_rep_count[n] = nconst_count;
-                }
-              }
-            } else {
-              Trace("nl-subs-debug")
-                  << "...could not get monomial sum " << std::endl;
-            }
-          }
-          ++eqc_i;
-        }
-        if (!r_c.isNull()) {
-          setSubstitutionConst(r, r_c, r_cb, r_c_exp, rep_to_subs_index, vars,
-                               subs, exp, retVal, reps_to_terms,
-                               term_to_nconst_rep_count, reps_to_parent_terms,
-                               term_to_sum, term_to_rep_sum, rep_to_const,
-                               rep_to_const_exp, rep_to_const_base);
-        }
-      }
-      ++eqcs_i;
+    NonLinearExtentionSubstitutionSolver substitution_solver(d_ee);
+    if (substitution_solver.solve(vars, &subs, &exp,
+                                  &rep_to_subs_index)) {
+      retVal = true;
     }
   }
 
@@ -575,8 +657,7 @@ Node NonlinearExtension::computeModelValue(Node n, unsigned index) {
 }
 
 void NonlinearExtension::registerMonomial(Node n) {
-  if (std::find(d_monomials.begin(), d_monomials.end(), n) ==
-      d_monomials.end()) {
+  if (!IsInVector(d_monomials, n)) {
     d_monomials.push_back(n);
     Trace("nl-alg-debug") << "Register monomial : " << n << std::endl;
     if (n.getKind() == kind::NONLINEAR_MULT) {
@@ -615,8 +696,7 @@ void NonlinearExtension::setMonomialFactor(Node a, Node b,
 }
 
 void NonlinearExtension::registerConstraint(Node atom) {
-  if (std::find(d_constraints.begin(), d_constraints.end(), atom) ==
-      d_constraints.end()) {
+  if (!IsInVector(d_constraints, atom)) {
     d_constraints.push_back(atom);
     Trace("nl-alg-debug") << "Register constraint : " << atom << std::endl;
     std::map<Node, Node> msum;
@@ -808,7 +888,7 @@ bool NonlinearExtension::hasNewMonomials(Node n, std::vector<Node>& existing,
   if (visited.find(n) == visited.end()) {
     visited[n] = true;
     if (n.getKind() == kind::NONLINEAR_MULT) {
-      return std::find(existing.begin(), existing.end(), n) == existing.end();
+      return !IsInVector(existing, n);
     } else {
       for (unsigned i = 0; i < n.getNumChildren(); i++) {
         if (hasNewMonomials(n[i], existing, visited)) {
@@ -820,17 +900,17 @@ bool NonlinearExtension::hasNewMonomials(Node n, std::vector<Node>& existing,
   return false;
 }
 
-Node NonlinearExtension::mkMonomialRemFactor(Node n, NodeMultiset& n_exp_rem) {
+Node NonlinearExtension::mkMonomialRemFactor(Node n, const NodeMultiset& n_exp_rem) const {
   std::vector<Node> children;
-  std::map<Node, NodeMultiset>::iterator itme = d_m_exp.find(n);
+  std::map<Node, NodeMultiset>::const_iterator itme = d_m_exp.find(n);
   Assert(itme != d_m_exp.end());
-  for (NodeMultiset::iterator itme2 = itme->second.begin();
+  for (NodeMultiset::const_iterator itme2 = itme->second.begin();
        itme2 != itme->second.end(); ++itme2) {
     unsigned inc = itme2->second;
     Node v = itme2->first;
     Trace("nl-alg-mono-factor")
         << "..." << inc << " factors of " << v << std::endl;
-    NodeMultiset::iterator itr = n_exp_rem.find(v);
+    NodeMultiset::const_iterator itr = n_exp_rem.find(v);
     if (itr != n_exp_rem.end()) {
       Assert(itr->second <= inc);
       inc = inc - itr->second;
@@ -984,7 +1064,8 @@ void NonlinearExtension::check(Theory::Effort e) {
         unsigned >::iterator itme2 = itme->second.begin(); itme2 !=
         itme->second.end(); ++itme2 ){ Node v = itme->first; Assert(
         d_mv[0].find( v )!=d_mv[0].end() ); Node mvv = d_mv[0][ v ]; if(
-        mvv==d_one || mvv==d_neg_one ){ ms_proc[ a ] = true; Trace("nl-alg-mv")
+        mvv==d_one || mvv==d_neg_one ){ ms_proc[ a ] = true;
+        Trace("nl-alg-mv")
         << "...mark " << a << " reduced since has 1 factor." << std::endl;
             break;
           }
@@ -1062,7 +1143,7 @@ void NonlinearExtension::check(Theory::Effort e) {
         assignOrderIds(ms_vars, d_order_vars[r], r);
 
         // sort individual variable lists
-        sortNonlinearExtension smv;
+        SortNonlinearExtension smv;
         smv.d_nla = this;
         smv.d_order_type = r;
         smv.d_reverse_order = true;
@@ -1070,8 +1151,8 @@ void NonlinearExtension::check(Theory::Effort e) {
           std::sort(d_m_vlist[ms[j]].begin(), d_m_vlist[ms[j]].end(), smv);
         }
         for (unsigned c = 0; c < 3; c++) {
-          // if (x,y,L) in cmp_infers, then x > y inferred as conclusion of L in
-          // lemmas
+          // if (x,y,L) in cmp_infers, then x > y inferred as conclusion of L
+          // in lemmas
           std::map<int, std::map<Node, std::map<Node, Node> > > cmp_infers;
           Trace("nl-alg") << "Get comparison lemmas (order=" << r
                           << ", compare=" << c << ")..." << std::endl;
@@ -1116,8 +1197,8 @@ void NonlinearExtension::check(Theory::Effort e) {
                       Assert(itmeb != d_m_exp.end());
 
                       std::vector<Node> exp;
-                      // take common factors of monomials, set minimum of common
-                      // exponents as processed
+                      // take common factors of monomials, set minimum of
+                      // common exponents as processed
                       NodeMultiset a_exp_proc;
                       NodeMultiset b_exp_proc;
                       for (NodeMultiset::iterator itmea2 =
@@ -1143,9 +1224,9 @@ void NonlinearExtension::check(Theory::Effort e) {
                       /*
                       if( !a_exp_proc.empty() ){
                         //reduction based on common exponents a > 0 => ( a * b
-                      <> a * c <=> b <> c ), a < 0 => ( a * b <> a * c <=> b !<>
-                      c )  ? }else{ compareMonomial( a, a, a_exp_proc, b, b,
-                      b_exp_proc, exp, lemmas );
+                      <> a * c <=> b <> c ), a < 0 => ( a * b <> a * c <=> b
+                      !<> c )  ? }else{ compareMonomial( a, a, a_exp_proc, b,
+                      b, b_exp_proc, exp, lemmas );
                       }
                       */
                       compareMonomial(a, a, a_exp_proc, b, b, b_exp_proc, exp,
@@ -1156,8 +1237,8 @@ void NonlinearExtension::check(Theory::Effort e) {
               }
             }
           }
-          // remove redundant lemmas, e.g. if a > b, b > c, a > c were inferred,
-          // discard lemma with conclusion a > c
+          // remove redundant lemmas, e.g. if a > b, b > c, a > c were
+          // inferred, discard lemma with conclusion a > c
           Trace("nl-alg-comp") << "Compute redundancies for " << lemmas.size()
                                << " lemmas." << std::endl;
           // naive
@@ -1210,7 +1291,7 @@ void NonlinearExtension::check(Theory::Effort e) {
       }
 
       // sort monomials by degree
-      sortNonlinearExtension snlad;
+      SortNonlinearExtension snlad;
       snlad.d_nla = this;
       snlad.d_order_type = 4;
       snlad.d_reverse_order = false;
@@ -1227,8 +1308,8 @@ void NonlinearExtension::check(Theory::Effort e) {
       std::map<Node, std::map<Node, std::map<Node, Node> > > ci_exp;
       std::map<Node, std::map<Node, std::map<Node, bool> > > ci_max;
 
-      // If ( m, p1, true ), then it would help satisfiability if m were ( > if
-      // p1=true, < if p1=false )
+      // If ( m, p1, true ), then it would help satisfiability if m were ( >
+      // if p1=true, < if p1=false )
       std::map<Node, std::map<bool, bool> > tplane_refine_dir;
 
       // register constraints
@@ -1321,8 +1402,8 @@ void NonlinearExtension::check(Theory::Effort e) {
                 Trace("nl-alg-bound") << std::endl;
               }
             }
-            // compute if bound is not satisfied, and store what is required for
-            // a possible refinement
+            // compute if bound is not satisfied, and store what is required
+            // for a possible refinement
             if (options::nlAlgTangentPlanes()) {
               if (is_false_lit) {
                 Node rhs_v = computeModelValue(rhs, 0);
@@ -1492,8 +1573,8 @@ void NonlinearExtension::check(Theory::Effort e) {
         }
       }
       // Trace("nl-alg") << "Bound lemmas : " << lemmas.size() << ", " <<
-      // nt_lemmas.size() << std::endl;  prioritize lemmas that do not introduce
-      // new monomials
+      // nt_lemmas.size() << std::endl;  prioritize lemmas that do not
+      // introduce new monomials
       lemmas_proc = flushLemmas(lemmas);
       if (lemmas_proc > 0) {
         Trace("nl-alg") << "  ...finished with " << lemmas_proc
@@ -1501,7 +1582,8 @@ void NonlinearExtension::check(Theory::Effort e) {
         return;
       }
 
-      //------------------------------------resolution bound inferences, e.g.  (
+      //------------------------------------resolution bound inferences, e.g.
+      //(
       // y>=0 ^ s <= x*z ^ x*y <= t ) => y*s <= z*t
       if (options::nlAlgResBound()) {
         Trace("nl-alg") << "Get resolution inferred bound lemmas..."
@@ -1624,7 +1706,8 @@ void NonlinearExtension::check(Theory::Effort e) {
                                           kind::AND, exp),
                                       conc);
                                   Trace("nl-alg-rbound-lemma-debug")
-                                      << "Resolution bound lemma (pre-rewrite) "
+                                      << "Resolution bound lemma "
+                                         "(pre-rewrite) "
                                          ": "
                                       << rblem << std::endl;
                                   rblem = Rewriter::rewrite(rblem);
@@ -1740,7 +1823,7 @@ void NonlinearExtension::check(Theory::Effort e) {
 void NonlinearExtension::assignOrderIds(std::vector<Node>& vars,
                                         NodeMultiset& order,
                                         unsigned orderType) {
-  sortNonlinearExtension smv;
+  SortNonlinearExtension smv;
   smv.d_nla = this;
   smv.d_order_type = orderType;
   smv.d_reverse_order = false;
@@ -1808,7 +1891,8 @@ int NonlinearExtension::compare(Node i, Node j, unsigned orderType) const {
   }
 }
 
-int NonlinearExtension::compare_value(Node i, Node j, unsigned orderType) const {
+int NonlinearExtension::compare_value(Node i, Node j,
+                                      unsigned orderType) const {
   Assert(orderType >= 0 && orderType <= 3);
   Trace("nl-alg-debug") << "compare_value " << i << " " << j
                         << ", o = " << orderType << std::endl;
@@ -1842,7 +1926,8 @@ Node NonlinearExtension::get_compare_value(Node i, unsigned orderType) const {
   return iti->second;
 }
 
-// trying to show a <> 0 by inequalities between variables in monomial a w.r.t 0
+// trying to show a <> 0 by inequalities between variables in monomial a w.r.t
+// 0
 int NonlinearExtension::compareSign(Node oa, Node a, unsigned a_index,
                                     int status, std::vector<Node>& exp,
                                     std::vector<Node>& lem) {
@@ -1928,8 +2013,8 @@ bool NonlinearExtension::cmp_holds(
   return false;
 }
 
-// trying to show a ( >, = ) b   by inequalities between variables in monomials
-// a,b
+// trying to show a ( >, = ) b   by inequalities between variables in
+// monomials a,b
 bool NonlinearExtension::compareMonomial(
     Node oa, Node a, unsigned a_index, NodeMultiset& a_exp_proc, Node ob,
     Node b, unsigned b_index, NodeMultiset& b_exp_proc, int status,
@@ -2068,7 +2153,8 @@ bool NonlinearExtension::compareMonomial(
 }
 
 // status 0 : n equal, -1 : n superset, 1 : n subset
-void NonlinearExtension::MonomialIndex::addTerm(Node n, std::vector<Node>& reps,
+void NonlinearExtension::MonomialIndex::addTerm(Node n,
+                                                const std::vector<Node>& reps,
                                                 NonlinearExtension* nla,
                                                 int status, unsigned argIndex) {
   if (status == 0) {

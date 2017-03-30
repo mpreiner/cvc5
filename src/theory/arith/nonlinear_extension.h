@@ -22,8 +22,8 @@
 
 #include <map>
 #include <queue>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #include "context/cdhashset.h"
 #include "context/cdinsert_hashmap.h"
@@ -66,8 +66,9 @@ class NonlinearExtension {
   class MonomialIndex {
    public:
     // status 0 : n equal, -1 : n superset, 1 : n subset
-    void addTerm(Node n, std::vector<Node>& reps, NonlinearExtension* nla,
+    void addTerm(Node n, const std::vector<Node>& reps, NonlinearExtension* nla,
                  int status = 0, unsigned argIndex = 0);
+
    private:
     std::map<Node, MonomialIndex> d_data;
     std::vector<Node> d_monos;
@@ -81,25 +82,6 @@ class NonlinearExtension {
     Kind d_type;
   }; /* struct ConstraintInfo */
 
-  Node getSubstitutionConst(Node n, std::vector<Node>& sum,
-                            std::vector<Node>& rep_sum, Node& v,
-                            std::map<Node, Node>& rep_to_const,
-                            std::map<Node, Node>& rep_to_const_exp,
-                            std::map<Node, Node>& rep_to_const_base,
-                            std::vector<Node>& r_c_exp);
-  void setSubstitutionConst(
-      Node r, Node r_c, Node r_cb, std::vector<Node>& r_c_exp,
-      std::map<Node, std::vector<int> >& rep_to_subs_index,
-      const std::vector<Node>& vars, std::vector<Node>& subs,
-      std::map<Node, std::vector<Node> >& exp, bool& retVal,
-      std::map<Node, std::vector<Node> > reps_to_terms,
-      std::map<Node, int>& term_to_nconst_rep_count,
-      std::map<Node, std::vector<Node> > reps_to_parent_terms,
-      std::map<Node, std::vector<Node> > term_to_sum,
-      std::map<Node, std::vector<Node> > term_to_rep_sum,
-      std::map<Node, Node>& rep_to_const,
-      std::map<Node, Node>& rep_to_const_exp,
-      std::map<Node, Node>& rep_to_const_base);
 
   bool isArithKind(Kind k);
   Node mkAnd(std::vector<Node>& a);
@@ -109,7 +91,7 @@ class NonlinearExtension {
   Kind transKinds(Kind k1, Kind k2);
   bool hasNewMonomials(Node n, std::vector<Node>& existing,
                        std::map<Node, bool>& visited);
-  Node mkMonomialRemFactor(Node n, NodeMultiset& n_exp_rem);
+  Node mkMonomialRemFactor(Node n, const NodeMultiset& n_exp_rem) const;
 
   // register monomial
   void registerMonomial(Node n);
@@ -120,8 +102,8 @@ class NonlinearExtension {
   Node computeModelValue(Node n, unsigned index = 0);
 
   Node get_compare_value(Node i, unsigned orderType) const;
-  void assignOrderIds(std::vector<Node>& vars,
-                      NodeMultiset& d_order, unsigned orderType);
+  void assignOrderIds(std::vector<Node>& vars, NodeMultiset& d_order,
+                      unsigned orderType);
   // status
   // 0 : equal
   // 1 : greater than or equal
@@ -133,13 +115,12 @@ class NonlinearExtension {
                   std::vector<Node>& exp, std::vector<Node>& lem);
   bool compareMonomial(
       Node oa, Node a, NodeMultiset& a_exp_proc, Node ob, Node b,
-      NodeMultiset& b_exp_proc, std::vector<Node>& exp,
-      std::vector<Node>& lem,
+      NodeMultiset& b_exp_proc, std::vector<Node>& exp, std::vector<Node>& lem,
       std::map<int, std::map<Node, std::map<Node, Node> > >& cmp_infers);
   bool compareMonomial(
-      Node oa, Node a, unsigned a_index, NodeMultiset& a_exp_proc,
-      Node ob, Node b, unsigned b_index, NodeMultiset& b_exp_proc,
-      int status, std::vector<Node>& exp, std::vector<Node>& lem,
+      Node oa, Node a, unsigned a_index, NodeMultiset& a_exp_proc, Node ob,
+      Node b, unsigned b_index, NodeMultiset& b_exp_proc, int status,
+      std::vector<Node>& exp, std::vector<Node>& lem,
       std::map<int, std::map<Node, std::map<Node, Node> > >& cmp_infers);
   bool cmp_holds(Node x, Node y,
                  std::map<Node, std::map<Node, Node> >& cmp_infers,
@@ -153,7 +134,7 @@ class NonlinearExtension {
   const NodeMultiset& getMonomialExponentMap(Node monomial) const;
 
   // Map from monomials to var^index.
-  typedef std::map<Node, NodeMultiset > MonomialExponentMap;
+  typedef std::map<Node, NodeMultiset> MonomialExponentMap;
   MonomialExponentMap d_m_exp;
 
   std::map<Node, std::vector<Node> > d_m_vlist;
@@ -199,7 +180,7 @@ class NonlinearExtension {
   std::map<Node, Node> d_mv[2];
 
   // ordering, stores variables and 0,1,-1
-  std::map<unsigned, NodeMultiset > d_order_vars;
+  std::map<unsigned, NodeMultiset> d_order_vars;
   std::vector<Node> d_order_points;
 }; /* class NonlinearExtension */
 
