@@ -1783,8 +1783,12 @@ void NonlinearExtension::check(Theory::Effort e) {
                        << std::endl;
     d_mv[0].clear();
     d_mv[1].clear();
-    const std::vector<Node> assertions(d_containing.facts_begin(),
-                                       d_containing.facts_end());
+    std::vector<Node> assertions;
+    for (Theory::assertions_iterator it = d_containing.facts_begin();
+         it != d_containing.facts_end(); ++it) {
+      const Assertion& assertion = *it;
+      assertions.push_back(assertion.assertion);
+    }
     const std::set<Node> false_asserts = getFalseInModel(assertions);
     if (!false_asserts.empty()) {
       checkLastCall(assertions, false_asserts);
