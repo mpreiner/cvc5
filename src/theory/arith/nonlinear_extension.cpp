@@ -42,6 +42,13 @@ bool Contains(const Container& c, const Key& k) {
   return c.find(k) != c.end();
 }
 
+// Inserts value into the set/map c if the value was not present there. Returns
+// true if the value was inserted.
+template <class Container, class Value>
+bool InsertIfNotPresent(Container* c, const Value& value) {
+  return (c->insert(value)).second;
+}
+
 // Returns true if a vector c contains an elem t.
 template <class T>
 bool IsInVector(const std::vector<T>& c, const T& t) {
@@ -958,6 +965,800 @@ int NonlinearExtension::flushLemmas(std::vector<Node>& lemmas) {
   return sum;
 }
 
+std::set<Node> NonlinearExtension::getFalseInModel(
+    const std::vector<Node>& assertions) {
+  std::set<Node> false_asserts;
+  for (size_t i = 0; i < assertions.size(); ++i) {
+    Node lit = assertions[i];
+    Node litv = computeModelValue(lit);
+    Trace("nl-alg-mv") << "M[[ " << lit << " ]] -> " << litv;
+    if (litv != d_true) {
+      Trace("nl-alg-mv") << " [model-false]" << std::endl;
+      Assert(litv == d_false);
+      false_asserts.insert(lit);
+    } else {
+      Trace("nl-alg-mv") << std::endl;
+    }
+  }
+  return false_asserts;
+}
+
+std::vector<Node> NonlinearExtension::splitOnZeros(
+    const std::vector<Node>& ms_vars) {
+  std::vector<Node> lemmas;
+  if (!options::nlAlgSplitZero()) {
+    return lemmas;
+  }
+  for (unsigned i = 0; i < ms_vars.size(); i++) {
+    Node v = ms_vars[i];
+    if (d_zero_split.insert(v)) {
+      Node lem = v.eqNode(d_zero);
+      lem = Rewriter::rewrite(lem);
+      d_containing.getValuation().ensureLiteral(lem);
+      d_containing.getOutputChannel().requirePhase(lem, true);
+      lem = NodeManager::currentNM()->mkNode(kind::OR, lem, lem.negate());
+      lemmas.push_back(lem);
+    }
+  }
+  return lemmas;
+}
+
+void NonlinearExtension::checkLastCall(const std::vector<Node>& assertions,
+                                       const std::set<Node>& false_asserts) {
+  // processed monomials
+  std::map<Node, bool> ms_proc;
+
+  // list of monomials
+  std::vector<Node> ms;
+  d_containing.getExtTheory()->getTerms(ms);
+  // list of variables occurring in monomials
+  std::vector<Node> ms_vars;
+
+  // register monomials
+  Trace("nl-alg-mv") << "Monomials : " << std::endl;
+  for (unsigned j = 0; j < ms.size(); j++) {
+    Node a = ms[j];
+    registerMonomial(a);
+    computeModelValue(a, 0);
+    computeModelValue(a, 1);
+    Assert(d_mv[1][a].isConst());
+    Assert(d_mv[0][a].isConst());
+    Trace("nl-alg-mv") << "  " << a << " -> " << d_mv[1][a] << " ["
+                       << d_mv[0][a] << "]" << std::endl;
+
+    std::map<Node, std::vector<Node> >::iterator itvl = d_m_vlist.find(a);
+    Assert(itvl != d_m_vlist.end());
+    for (unsigned k = 0; k < itvl->second.size(); k++) {
+      if (!IsInVector(ms_vars, itvl->second[k])) {
+        ms_vars.push_back(itvl->second[k]);
+      }
+    }
+    /*
+    //mark processed if has a "one" factor (will look at reduced monomial)
+    std::map< Node, std::map< Node, unsigned > >::iterator itme =
+    d_m_exp.find( a ); Assert( itme!=d_m_exp.end() ); for( std::map< Node,
+    unsigned >::iterator itme2 = itme->second.begin(); itme2 !=
+    itme->second.end(); ++itme2 ){ Node v = itme->first; Assert(
+    d_mv[0].find( v )!=d_mv[0].end() ); Node mvv = d_mv[0][ v ]; if(
+    mvv==d_one || mvv==d_neg_one ){ ms_proc[ a ] = true;
+    Trace("nl-alg-mv")
+    << "...mark " << a << " reduced since has 1 factor." << std::endl;
+        break;
+      }
+    }
+    */
+  }
+
+  // register constants
+  registerMonomial(d_one);
+  for (unsigned j = 0; j < d_order_points.size(); j++) {
+    Node c = d_order_points[j];
+    computeModelValue(c, 0);
+    computeModelValue(c, 1);
+  }
+
+  int lemmas_proc;
+  std::vector<Node> lemmas;
+
+  // register variables
+  Trace("nl-alg-mv") << "Variables : " << std::endl;
+  Trace("nl-alg") << "Get zero split lemmas..." << std::endl;
+  for (unsigned i = 0; i < ms_vars.size(); i++) {
+    Node v = ms_vars[i];
+    registerMonomial(v);
+    computeModelValue(v, 0);
+    computeModelValue(v, 1);
+    Trace("nl-alg-mv") << "  " << v << " -> " << d_mv[0][v] << std::endl;
+  }
+
+  // possibly split on zero?
+  lemmas = splitOnZeros(ms_vars);
+  lemmas_proc = flushLemmas(lemmas);
+  if (lemmas_proc > 0) {
+    Trace("nl-alg") << "  ...finished with " << lemmas_proc << " new lemmas."
+                    << std::endl;
+    return;
+  }
+
+  //-----------------------------------lemmas based on sign (comparison to zero)
+  std::map<Node, int> signs;
+  Trace("nl-alg") << "Get sign lemmas..." << std::endl;
+  for (unsigned j = 0; j < ms.size(); j++) {
+    Node a = ms[j];
+    if (ms_proc.find(a) == ms_proc.end()) {
+      std::vector<Node> exp;
+      Trace("nl-alg-debug") << "  process " << a << "..." << std::endl;
+      signs[a] = compareSign(a, a, 0, 1, exp, lemmas);
+      if (signs[a] == 0) {
+        ms_proc[a] = true;
+        Trace("nl-alg-mv") << "...mark " << a
+                           << " reduced since its value is 0." << std::endl;
+      }
+    }
+  }
+  lemmas_proc = flushLemmas(lemmas);
+  if (lemmas_proc > 0) {
+    Trace("nl-alg") << "  ...finished with " << lemmas_proc << " new lemmas."
+                    << std::endl;
+    return;
+  }
+
+  //-----------------------------lemmas based on magnitude of non-zero monomials
+  for (unsigned r = 1; r <= 1; r++) {
+    assignOrderIds(ms_vars, d_order_vars[r], r);
+
+    // sort individual variable lists
+    SortNonlinearExtension smv;
+    smv.d_nla = this;
+    smv.d_order_type = r;
+    smv.d_reverse_order = true;
+    for (unsigned j = 0; j < ms.size(); j++) {
+      std::sort(d_m_vlist[ms[j]].begin(), d_m_vlist[ms[j]].end(), smv);
+    }
+    for (unsigned c = 0; c < 3; c++) {
+      // if (x,y,L) in cmp_infers, then x > y inferred as conclusion of L
+      // in lemmas
+      std::map<int, std::map<Node, std::map<Node, Node> > > cmp_infers;
+      Trace("nl-alg") << "Get comparison lemmas (order=" << r
+                      << ", compare=" << c << ")..." << std::endl;
+      for (unsigned j = 0; j < ms.size(); j++) {
+        Node a = ms[j];
+        if (ms_proc.find(a) == ms_proc.end()) {
+          if (c == 0) {
+            // compare magnitude against 1
+            std::vector<Node> exp;
+            NodeMultiset a_exp_proc;
+            NodeMultiset b_exp_proc;
+            compareMonomial(a, a, a_exp_proc, d_one, d_one, b_exp_proc, exp,
+                            lemmas, cmp_infers);
+          } else {
+            std::map<Node, NodeMultiset>::iterator itmea = d_m_exp.find(a);
+            Assert(itmea != d_m_exp.end());
+            if (c == 1) {
+              // TODO : not just against containing variables?
+              // compare magnitude against variables
+              for (unsigned k = 0; k < ms_vars.size(); k++) {
+                Node v = ms_vars[k];
+                std::vector<Node> exp;
+                NodeMultiset a_exp_proc;
+                NodeMultiset b_exp_proc;
+                if (itmea->second.find(v) != itmea->second.end()) {
+                  a_exp_proc[v] = 1;
+                  b_exp_proc[v] = 1;
+                  setMonomialFactor(a, v, a_exp_proc);
+                  setMonomialFactor(v, a, b_exp_proc);
+                  compareMonomial(a, a, a_exp_proc, v, v, b_exp_proc, exp,
+                                  lemmas, cmp_infers);
+                }
+              }
+            } else {
+              // compare magnitude against other non-linear monomials
+              for (unsigned k = (j + 1); k < ms.size(); k++) {
+                Node b = ms[k];
+                //(signs[a]==signs[b])==(r==0)
+                if (ms_proc.find(b) == ms_proc.end()) {
+                  std::map<Node, NodeMultiset>::iterator itmeb =
+                      d_m_exp.find(b);
+                  Assert(itmeb != d_m_exp.end());
+
+                  std::vector<Node> exp;
+                  // take common factors of monomials, set minimum of
+                  // common exponents as processed
+                  NodeMultiset a_exp_proc;
+                  NodeMultiset b_exp_proc;
+                  for (NodeMultiset::iterator itmea2 = itmea->second.begin();
+                       itmea2 != itmea->second.end(); ++itmea2) {
+                    NodeMultiset::iterator itmeb2 =
+                        itmeb->second.find(itmea2->first);
+                    if (itmeb2 != itmeb->second.end()) {
+                      unsigned min_exp = itmea2->second > itmeb2->second
+                                             ? itmeb2->second
+                                             : itmea2->second;
+                      a_exp_proc[itmea2->first] = min_exp;
+                      b_exp_proc[itmea2->first] = min_exp;
+                      Trace("nl-alg-comp")
+                          << "Common exponent : " << itmea2->first << " : "
+                          << min_exp << std::endl;
+                    }
+                  }
+                  if (!a_exp_proc.empty()) {
+                    setMonomialFactor(a, b, a_exp_proc);
+                    setMonomialFactor(b, a, b_exp_proc);
+                  }
+                  /*
+                  if( !a_exp_proc.empty() ){
+                    //reduction based on common exponents a > 0 => ( a * b
+                  <> a * c <=> b <> c ), a < 0 => ( a * b <> a * c <=> b
+                  !<> c )  ? }else{ compareMonomial( a, a, a_exp_proc, b,
+                  b, b_exp_proc, exp, lemmas );
+                  }
+                  */
+                  compareMonomial(a, a, a_exp_proc, b, b, b_exp_proc, exp,
+                                  lemmas, cmp_infers);
+                }
+              }
+            }
+          }
+        }
+      }
+      // remove redundant lemmas, e.g. if a > b, b > c, a > c were
+      // inferred, discard lemma with conclusion a > c
+      Trace("nl-alg-comp") << "Compute redundancies for " << lemmas.size()
+                           << " lemmas." << std::endl;
+      // naive
+      std::vector<Node> r_lemmas;
+      for (std::map<int, std::map<Node, std::map<Node, Node> > >::iterator itb =
+               cmp_infers.begin();
+           itb != cmp_infers.end(); ++itb) {
+        for (std::map<Node, std::map<Node, Node> >::iterator itc =
+                 itb->second.begin();
+             itc != itb->second.end(); ++itc) {
+          for (std::map<Node, Node>::iterator itc2 = itc->second.begin();
+               itc2 != itc->second.end(); ++itc2) {
+            std::map<Node, bool> visited;
+            for (std::map<Node, Node>::iterator itc3 = itc->second.begin();
+                 itc3 != itc->second.end(); ++itc3) {
+              if (itc3->first != itc2->first) {
+                std::vector<Node> exp;
+                if (cmp_holds(itc3->first, itc2->first, itb->second, exp,
+                              visited)) {
+                  r_lemmas.push_back(itc2->second);
+                  Trace("nl-alg-comp")
+                      << "...inference of " << itc->first << " > "
+                      << itc2->first << " was redundant." << std::endl;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+      std::vector<Node> nr_lemmas;
+      for (unsigned i = 0; i < lemmas.size(); i++) {
+        if (std::find(r_lemmas.begin(), r_lemmas.end(), lemmas[i]) ==
+            r_lemmas.end()) {
+          nr_lemmas.push_back(lemmas[i]);
+        }
+      }
+      // TODO: only take maximal lower/minimial lower bounds?
+
+      Trace("nl-alg-comp") << nr_lemmas.size() << " / " << lemmas.size()
+                           << " were non-redundant." << std::endl;
+      lemmas_proc = flushLemmas(nr_lemmas);
+      if (lemmas_proc > 0) {
+        Trace("nl-alg") << "  ...finished with " << lemmas_proc
+                        << " new lemmas (out of possible " << lemmas.size()
+                        << ")." << std::endl;
+        return;
+      }
+    }
+  }
+
+  // sort monomials by degree
+  SortNonlinearExtension snlad;
+  snlad.d_nla = this;
+  snlad.d_order_type = 4;
+  snlad.d_reverse_order = false;
+  std::sort(ms.begin(), ms.end(), snlad);
+  // all monomials
+  std::vector<Node> terms;
+  terms.insert(terms.end(), ms_vars.begin(), ms_vars.end());
+  terms.insert(terms.end(), ms.begin(), ms.end());
+
+  // term -> coeff -> rhs -> ( status, exp, b ),
+  //   where we have that : exp =>  ( coeff * term <status> rhs )
+  //   b is true if degree( term ) >= degree( rhs )
+  std::map<Node, std::map<Node, std::map<Node, Kind> > > ci;
+  std::map<Node, std::map<Node, std::map<Node, Node> > > ci_exp;
+  std::map<Node, std::map<Node, std::map<Node, bool> > > ci_max;
+
+  // If ( m, p1, true ), then it would help satisfiability if m were ( >
+  // if p1=true, < if p1=false )
+  std::map<Node, std::map<bool, bool> > tplane_refine_dir;
+
+  // register constraints
+  Trace("nl-alg-debug") << "Register bound constraints..." << std::endl;
+  for (context::CDList<Assertion>::const_iterator it =
+           d_containing.facts_begin();
+       it != d_containing.facts_end(); ++it) {
+    Node lit = (*it).assertion;
+    bool polarity = lit.getKind() != kind::NOT;
+    Node atom = lit.getKind() == kind::NOT ? lit[0] : lit;
+    registerConstraint(atom);
+    bool is_false_lit = false_asserts.find(lit) != false_asserts.end();
+    // add information about bounds to variables
+    std::map<Node, std::map<Node, ConstraintInfo> >::iterator itc =
+        d_c_info.find(atom);
+    std::map<Node, std::map<Node, bool> >::iterator itcm =
+        d_c_info_maxm.find(atom);
+    if (itc != d_c_info.end()) {
+      Assert(itcm != d_c_info_maxm.end());
+      for (std::map<Node, ConstraintInfo>::iterator itcc = itc->second.begin();
+           itcc != itc->second.end(); ++itcc) {
+        Node x = itcc->first;
+        Node coeff = itcc->second.d_coeff;
+        Node rhs = itcc->second.d_rhs;
+        Kind type = itcc->second.d_type;
+        Node exp = lit;
+        if (!polarity) {
+          // reverse
+          if (type == kind::EQUAL) {
+            // we will take the strict inequality in the direction of the
+            // model
+            Node lhs = QuantArith::mkCoeffTerm(coeff, x);
+            Node query = NodeManager::currentNM()->mkNode(kind::GT, lhs, rhs);
+            Node query_mv = computeModelValue(query, 1);
+            if (query_mv == d_true) {
+              exp = query;
+              type = kind::GT;
+            } else {
+              Assert(query_mv == d_false);
+              exp = NodeManager::currentNM()->mkNode(kind::LT, lhs, rhs);
+              type = kind::LT;
+            }
+          } else {
+            type = negateKind(type);
+          }
+        }
+        // add to status if maximal degree
+        ci_max[x][coeff][rhs] = itcm->second.find(x) != itcm->second.end();
+        if (Trace.isOn("nl-alg-bound-debug2")) {
+          Node t = QuantArith::mkCoeffTerm(coeff, x);
+          Trace("nl-alg-bound-debug2")
+              << "Add Bound: " << t << " " << type << " " << rhs << " by "
+              << exp << std::endl;
+        }
+        bool updated = true;
+        std::map<Node, Kind>::iterator its = ci[x][coeff].find(rhs);
+        if (its == ci[x][coeff].end()) {
+          ci[x][coeff][rhs] = type;
+          ci_exp[x][coeff][rhs] = exp;
+        } else if (type != its->second) {
+          Trace("nl-alg-bound-debug2")
+              << "Joining kinds : " << type << " " << its->second << std::endl;
+          Kind jk = joinKinds(type, its->second);
+          if (jk == kind::UNDEFINED_KIND) {
+            updated = false;
+          } else if (jk != its->second) {
+            if (jk == type) {
+              ci[x][coeff][rhs] = type;
+              ci_exp[x][coeff][rhs] = exp;
+            } else {
+              ci[x][coeff][rhs] = jk;
+              ci_exp[x][coeff][rhs] = NodeManager::currentNM()->mkNode(
+                  kind::AND, ci_exp[x][coeff][rhs], exp);
+            }
+          } else {
+            updated = false;
+          }
+        }
+        if (Trace.isOn("nl-alg-bound")) {
+          if (updated) {
+            Trace("nl-alg-bound") << "Bound: ";
+            debugPrintBound("nl-alg-bound", coeff, x, ci[x][coeff][rhs], rhs);
+            Trace("nl-alg-bound") << " by " << ci_exp[x][coeff][rhs];
+            if (ci_max[x][coeff][rhs]) {
+              Trace("nl-alg-bound") << ", is max degree";
+            }
+            Trace("nl-alg-bound") << std::endl;
+          }
+        }
+        // compute if bound is not satisfied, and store what is required
+        // for a possible refinement
+        if (options::nlAlgTangentPlanes()) {
+          if (is_false_lit) {
+            Node rhs_v = computeModelValue(rhs, 0);
+            Node x_v = computeModelValue(x, 0);
+            bool needsRefine = false;
+            bool refineDir;
+            if (rhs_v == x_v) {
+              if (type == kind::GT) {
+                needsRefine = true;
+                refineDir = true;
+              } else if (type == kind::LT) {
+                needsRefine = true;
+                refineDir = false;
+              }
+            } else if (x_v.getConst<Rational>() > rhs_v.getConst<Rational>()) {
+              if (type != kind::GT && type != kind::GEQ) {
+                needsRefine = true;
+                refineDir = false;
+              }
+            } else {
+              if (type != kind::LT && type != kind::LEQ) {
+                needsRefine = true;
+                refineDir = true;
+              }
+            }
+            Trace("nl-alg-tplanes-cons-debug")
+                << "...compute if bound corresponds to a required "
+                   "refinement"
+                << std::endl;
+            Trace("nl-alg-tplanes-cons-debug")
+                << "...M[" << x << "] = " << x_v << ", M[" << rhs
+                << "] = " << rhs_v << std::endl;
+            Trace("nl-alg-tplanes-cons-debug") << "...refine = " << needsRefine
+                                               << "/" << refineDir << std::endl;
+            if (needsRefine) {
+              Trace("nl-alg-tplanes-cons")
+                  << "---> By " << lit << " and since M[" << x << "] = " << x_v
+                  << ", M[" << rhs << "] = " << rhs_v << ", ";
+              Trace("nl-alg-tplanes-cons")
+                  << "monomial " << x << " should be "
+                  << (refineDir ? "larger" : "smaller") << std::endl;
+              tplane_refine_dir[x][refineDir] = true;
+            }
+          }
+        }
+      }
+    }
+  }
+  // reflexive constraints
+  Node null_coeff;
+  for (unsigned j = 0; j < terms.size(); j++) {
+    Node n = terms[j];
+    ci[n][null_coeff][n] = kind::EQUAL;
+    ci_exp[n][null_coeff][n] = d_true;
+    ci_max[n][null_coeff][n] = false;
+  }
+
+  //-----------------------------------------------------------------------------------------inferred
+  // bounds lemmas, e.g. x >= t => y*x >= y*t
+  Trace("nl-alg") << "Get inferred bound lemmas..." << std::endl;
+
+  std::vector<Node> nt_lemmas;
+  for (unsigned k = 0; k < terms.size(); k++) {
+    Node x = terms[k];
+    Trace("nl-alg-bound-debug")
+        << "Process bounds for " << x << " : " << std::endl;
+    std::map<Node, std::vector<Node> >::iterator itm =
+        d_m_contain_parent.find(x);
+    if (itm != d_m_contain_parent.end()) {
+      Trace("nl-alg-bound-debug") << "...has " << itm->second.size()
+                                  << " parent monomials." << std::endl;
+      // check derived bounds
+      std::map<Node, std::map<Node, std::map<Node, Kind> > >::iterator itc =
+          ci.find(x);
+      if (itc != ci.end()) {
+        for (std::map<Node, std::map<Node, Kind> >::iterator itcc =
+                 itc->second.begin();
+             itcc != itc->second.end(); ++itcc) {
+          Node coeff = itcc->first;
+          Node t = QuantArith::mkCoeffTerm(coeff, x);
+          for (std::map<Node, Kind>::iterator itcr = itcc->second.begin();
+               itcr != itcc->second.end(); ++itcr) {
+            Node rhs = itcr->first;
+            // only consider this bound if maximal degree
+            if (ci_max[x][coeff][rhs]) {
+              Kind type = itcr->second;
+              for (unsigned j = 0; j < itm->second.size(); j++) {
+                Node y = itm->second[j];
+                Assert(d_m_contain_mult[x].find(y) !=
+                       d_m_contain_mult[x].end());
+                Node mult = d_m_contain_mult[x][y];
+                // x <k> t => m*x <k'> t  where y = m*x
+                // get the sign of mult
+                Node mmv = computeModelValue(mult);
+                Trace("nl-alg-bound-debug2")
+                    << "Model value of " << mult << " is " << mmv << std::endl;
+                Assert(mmv.isConst());
+                int mmv_sign = mmv.getConst<Rational>().sgn();
+                Trace("nl-alg-bound-debug2")
+                    << "  sign of " << mmv << " is " << mmv_sign << std::endl;
+                if (mmv_sign != 0) {
+                  Trace("nl-alg-bound-debug")
+                      << "  from " << x << " * " << mult << " = " << y
+                      << " and " << t << " " << type << " " << rhs
+                      << ", infer : " << std::endl;
+                  Kind infer_type =
+                      mmv_sign == -1 ? reverseRelationKind(type) : type;
+                  Node infer_lhs =
+                      NodeManager::currentNM()->mkNode(kind::MULT, mult, t);
+                  Node infer_rhs =
+                      NodeManager::currentNM()->mkNode(kind::MULT, mult, rhs);
+                  Node infer = NodeManager::currentNM()->mkNode(
+                      infer_type, infer_lhs, infer_rhs);
+                  Trace("nl-alg-bound-debug") << "     " << infer << std::endl;
+                  infer = Rewriter::rewrite(infer);
+                  Trace("nl-alg-bound-debug2")
+                      << "     ...rewritten : " << infer << std::endl;
+                  // check whether it is false in model for abstraction
+                  Node infer_mv = computeModelValue(infer, 1);
+                  Trace("nl-alg-bound-debug")
+                      << "       ...infer model value is " << infer_mv
+                      << std::endl;
+                  if (infer_mv == d_false) {
+                    Node exp = NodeManager::currentNM()->mkNode(
+                        kind::AND,
+                        NodeManager::currentNM()->mkNode(
+                            mmv_sign == 1 ? kind::GT : kind::LT, mult, d_zero),
+                        ci_exp[x][coeff][rhs]);
+                    Node iblem = NodeManager::currentNM()->mkNode(kind::IMPLIES,
+                                                                  exp, infer);
+                    Node pr_iblem = iblem;
+                    iblem = Rewriter::rewrite(iblem);
+                    bool introNewTerms = hasNewMonomials(iblem, ms);
+                    Trace("nl-alg-bound-lemma")
+                        << "*** Bound inference lemma : " << iblem
+                        << " (pre-rewrite : " << pr_iblem << ")" << std::endl;
+                    // Trace("nl-alg-bound-lemma") << "       intro new
+                    // monomials = " << introNewTerms << std::endl;
+                    if (!introNewTerms) {
+                      lemmas.push_back(iblem);
+                    } else {
+                      nt_lemmas.push_back(iblem);
+                    }
+                  }
+                } else {
+                  Trace("nl-alg-bound-debug") << "     ...coefficient " << mult
+                                              << " is zero." << std::endl;
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      Trace("nl-alg-bound-debug") << "...has no parent monomials." << std::endl;
+    }
+  }
+  // Trace("nl-alg") << "Bound lemmas : " << lemmas.size() << ", " <<
+  // nt_lemmas.size() << std::endl;  prioritize lemmas that do not
+  // introduce new monomials
+  lemmas_proc = flushLemmas(lemmas);
+  if (lemmas_proc > 0) {
+    Trace("nl-alg") << "  ...finished with " << lemmas_proc << " new lemmas."
+                    << std::endl;
+    return;
+  }
+
+  //------------------------------------resolution bound inferences, e.g.
+  //(
+  // y>=0 ^ s <= x*z ^ x*y <= t ) => y*s <= z*t
+  if (options::nlAlgResBound()) {
+    Trace("nl-alg") << "Get resolution inferred bound lemmas..." << std::endl;
+    for (unsigned j = 0; j < terms.size(); j++) {
+      Node a = terms[j];
+      std::map<Node, std::map<Node, std::map<Node, Kind> > >::iterator itca =
+          ci.find(a);
+      if (itca != ci.end()) {
+        for (unsigned k = (j + 1); k < terms.size(); k++) {
+          Node b = terms[k];
+          std::map<Node, std::map<Node, std::map<Node, Kind> > >::iterator
+              itcb = ci.find(b);
+          if (itcb != ci.end()) {
+            Trace("nl-alg-rbound-debug") << "resolution inferences : compare "
+                                         << a << " and " << b << std::endl;
+            // if they have common factors
+            std::map<Node, Node>::iterator ita = d_mono_diff[a].find(b);
+            if (ita != d_mono_diff[a].end()) {
+              std::map<Node, Node>::iterator itb = d_mono_diff[b].find(a);
+              Assert(itb != d_mono_diff[b].end());
+              Node mv_a = computeModelValue(ita->second, 1);
+              Assert(mv_a.isConst());
+              int mv_a_sgn = mv_a.getConst<Rational>().sgn();
+              Assert(mv_a_sgn != 0);
+              Node mv_b = computeModelValue(itb->second, 1);
+              Assert(mv_b.isConst());
+              int mv_b_sgn = mv_b.getConst<Rational>().sgn();
+              Assert(mv_b_sgn != 0);
+              Trace("nl-alg-rbound") << "Get resolution inferences for [a] "
+                                     << a << " vs [b] " << b << std::endl;
+              Trace("nl-alg-rbound")
+                  << "  [a] factor is " << ita->second
+                  << ", sign in model = " << mv_a_sgn << std::endl;
+              Trace("nl-alg-rbound")
+                  << "  [b] factor is " << itb->second
+                  << ", sign in model = " << mv_b_sgn << std::endl;
+
+              std::vector<Node> exp;
+              // bounds of a
+              for (std::map<Node, std::map<Node, Kind> >::iterator itcac =
+                       itca->second.begin();
+                   itcac != itca->second.end(); ++itcac) {
+                Node coeff_a = itcac->first;
+                for (std::map<Node, Kind>::iterator itcar =
+                         itcac->second.begin();
+                     itcar != itcac->second.end(); ++itcar) {
+                  Node rhs_a = itcar->first;
+                  Node rhs_a_res_base = NodeManager::currentNM()->mkNode(
+                      kind::MULT, itb->second, rhs_a);
+                  rhs_a_res_base = Rewriter::rewrite(rhs_a_res_base);
+                  if (!hasNewMonomials(rhs_a_res_base, ms)) {
+                    Kind type_a = itcar->second;
+                    exp.push_back(ci_exp[a][coeff_a][rhs_a]);
+
+                    // bounds of b
+                    for (std::map<Node, std::map<Node, Kind> >::iterator itcbc =
+                             itcb->second.begin();
+                         itcbc != itcb->second.end(); ++itcbc) {
+                      Node coeff_b = itcbc->first;
+                      Node rhs_a_res =
+                          QuantArith::mkCoeffTerm(coeff_b, rhs_a_res_base);
+                      for (std::map<Node, Kind>::iterator itcbr =
+                               itcbc->second.begin();
+                           itcbr != itcbc->second.end(); ++itcbr) {
+                        Node rhs_b = itcbr->first;
+                        Node rhs_b_res = NodeManager::currentNM()->mkNode(
+                            kind::MULT, ita->second, rhs_b);
+                        rhs_b_res = QuantArith::mkCoeffTerm(coeff_a, rhs_b_res);
+                        rhs_b_res = Rewriter::rewrite(rhs_b_res);
+                        if (!hasNewMonomials(rhs_b_res, ms)) {
+                          Kind type_b = itcbr->second;
+                          exp.push_back(ci_exp[b][coeff_b][rhs_b]);
+                          if (Trace.isOn("nl-alg-rbound")) {
+                            Trace("nl-alg-rbound") << "* try bounds : ";
+                            debugPrintBound("nl-alg-rbound", coeff_a, a, type_a,
+                                            rhs_a);
+                            Trace("nl-alg-rbound") << std::endl;
+                            Trace("nl-alg-rbound") << "               ";
+                            debugPrintBound("nl-alg-rbound", coeff_b, b, type_b,
+                                            rhs_b);
+                            Trace("nl-alg-rbound") << std::endl;
+                          }
+                          Kind types[2];
+                          for (unsigned r = 0; r < 2; r++) {
+                            Node pivot_factor =
+                                r == 0 ? itb->second : ita->second;
+                            int pivot_factor_sign =
+                                r == 0 ? mv_b_sgn : mv_a_sgn;
+                            types[r] = r == 0 ? type_a : type_b;
+                            if (pivot_factor_sign == (r == 0 ? 1 : -1)) {
+                              types[r] = reverseRelationKind(types[r]);
+                            }
+                            if (pivot_factor_sign == 1) {
+                              exp.push_back(NodeManager::currentNM()->mkNode(
+                                  kind::GT, pivot_factor, d_zero));
+                            } else {
+                              exp.push_back(NodeManager::currentNM()->mkNode(
+                                  kind::LT, pivot_factor, d_zero));
+                            }
+                          }
+                          Kind jk = transKinds(types[0], types[1]);
+                          Trace("nl-alg-rbound-debug")
+                              << "trans kind : " << types[0] << " + "
+                              << types[1] << " = " << jk << std::endl;
+                          if (jk != kind::UNDEFINED_KIND) {
+                            Node conc = NodeManager::currentNM()->mkNode(
+                                jk, rhs_a_res, rhs_b_res);
+                            Node conc_mv = computeModelValue(conc, 1);
+                            if (conc_mv == d_false) {
+                              Node rblem = NodeManager::currentNM()->mkNode(
+                                  kind::IMPLIES,
+                                  NodeManager::currentNM()->mkNode(kind::AND,
+                                                                   exp),
+                                  conc);
+                              Trace("nl-alg-rbound-lemma-debug")
+                                  << "Resolution bound lemma "
+                                     "(pre-rewrite) "
+                                     ": "
+                                  << rblem << std::endl;
+                              rblem = Rewriter::rewrite(rblem);
+                              Trace("nl-alg-rbound-lemma")
+                                  << "Resolution bound lemma : " << rblem
+                                  << std::endl;
+                              lemmas.push_back(rblem);
+                            }
+                          }
+                          exp.pop_back();
+                          exp.pop_back();
+                          exp.pop_back();
+                        }
+                      }
+                    }
+                    exp.pop_back();
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    lemmas_proc = flushLemmas(lemmas);
+    if (lemmas_proc > 0) {
+      Trace("nl-alg") << "  ...finished with " << lemmas_proc << " new lemmas."
+                      << std::endl;
+      return;
+    }
+  }
+
+  // from inferred bound inferences
+  lemmas_proc = flushLemmas(nt_lemmas);
+  if (lemmas_proc > 0) {
+    Trace("nl-alg") << "  ...finished with " << lemmas_proc
+                    << " new (monomial-introducing) lemmas." << std::endl;
+    return;
+  }
+
+  if (options::nlAlgTangentPlanes()) {
+    Trace("nl-alg") << "Get tangent plane lemmas..." << std::endl;
+    unsigned kstart = ms_vars.size();
+    for (unsigned k = kstart; k < terms.size(); k++) {
+      Node t = terms[k];
+      // if this term requires a refinement
+      if (tplane_refine_dir.find(t) != tplane_refine_dir.end()) {
+        Trace("nl-alg-tplanes")
+            << "Look at monomial requiring refinement : " << t << std::endl;
+        // get a decomposition
+        std::map<Node, std::vector<Node> >::iterator it =
+            d_m_contain_children.find(t);
+        if (it != d_m_contain_children.end()) {
+          std::map<Node, std::map<Node, bool> > dproc;
+          for (unsigned j = 0; j < it->second.size(); j++) {
+            Node tc = it->second[j];
+            if (tc != d_one) {
+              Node tc_diff = d_m_contain_umult[tc][t];
+              Assert(!tc_diff.isNull());
+              Node a = tc < tc_diff ? tc : tc_diff;
+              Node b = tc < tc_diff ? tc_diff : tc;
+              if (dproc[a].find(b) == dproc[a].end()) {
+                dproc[a][b] = true;
+                Trace("nl-alg-tplanes")
+                    << "  decomposable into : " << a << " * " << b << std::endl;
+                Node a_v = computeModelValue(a, 1);
+                Node b_v = computeModelValue(b, 1);
+                // tangent plane
+                Node tplane = NodeManager::currentNM()->mkNode(
+                    kind::MINUS,
+                    NodeManager::currentNM()->mkNode(
+                        kind::PLUS,
+                        NodeManager::currentNM()->mkNode(kind::MULT, b_v, a),
+                        NodeManager::currentNM()->mkNode(kind::MULT, a_v, b)),
+                    NodeManager::currentNM()->mkNode(kind::MULT, a_v, b_v));
+                for (unsigned d = 0; d < 4; d++) {
+                  Node aa = NodeManager::currentNM()->mkNode(
+                      d == 0 || d == 3 ? kind::GEQ : kind::LEQ, a, a_v);
+                  Node ab = NodeManager::currentNM()->mkNode(
+                      d == 1 || d == 3 ? kind::GEQ : kind::LEQ, b, b_v);
+                  Node conc = NodeManager::currentNM()->mkNode(
+                      d <= 1 ? kind::LEQ : kind::GEQ, t, tplane);
+                  Node tlem = NodeManager::currentNM()->mkNode(
+                      kind::OR, aa.negate(), ab.negate(), conc);
+                  Trace("nl-alg-tplanes")
+                      << "Tangent plane lemma : " << tlem << std::endl;
+                  lemmas.push_back(tlem);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    Trace("nl-alg") << "...trying " << lemmas.size()
+                    << " tangent plane lemmas..." << std::endl;
+    lemmas_proc = flushLemmas(lemmas);
+    if (lemmas_proc > 0) {
+      Trace("nl-alg") << "  ...finished with " << lemmas_proc << " new lemmas."
+                      << std::endl;
+      return;
+    }
+  }
+
+  Trace("nl-alg") << "...set incomplete" << std::endl;
+  d_containing.getOutputChannel().setIncomplete();
+}
+
 void NonlinearExtension::check(Theory::Effort e) {
   Trace("nl-alg") << std::endl;
   Trace("nl-alg") << "NonlinearExtension::check, effort = " << e << std::endl;
@@ -977,816 +1778,16 @@ void NonlinearExtension::check(Theory::Effort e) {
       }
     }
   } else {
-    d_mv[0].clear();
-    d_mv[1].clear();
     Assert(e == Theory::EFFORT_LAST_CALL);
-    bool setIncomplete = false;
     Trace("nl-alg-mv") << "Getting model values... check for [model-false]"
                        << std::endl;
-    std::vector<Node> asserts;
-    std::map<Node, bool> false_asserts;
-    for (context::CDList<Assertion>::const_iterator it =
-             d_containing.facts_begin();
-         it != d_containing.facts_end(); ++it) {
-      Node lit = (*it).assertion;
-      asserts.push_back(lit);
-      Node litv = computeModelValue(lit);
-      Trace("nl-alg-mv") << "M[[ " << lit << " ]] -> " << litv;
-      if (litv != d_true) {
-        Trace("nl-alg-mv") << " [model-false]" << std::endl;
-        Assert(litv == d_false);
-        setIncomplete = true;
-        Trace("nl-alg-mv") << "...will set incomplete." << std::endl;
-        false_asserts[lit] = true;
-      } else {
-        Trace("nl-alg-mv") << std::endl;
-      }
-    }
-    if (setIncomplete) {
-      // processed monomials
-      std::map<Node, bool> ms_proc;
-
-      // list of monomials
-      std::vector<Node> ms;
-      d_containing.getExtTheory()->getTerms(ms);
-      // list of variables occurring in monomials
-      std::vector<Node> ms_vars;
-
-      // register monomials
-      Trace("nl-alg-mv") << "Monomials : " << std::endl;
-      for (unsigned j = 0; j < ms.size(); j++) {
-        Node a = ms[j];
-        registerMonomial(a);
-        computeModelValue(a, 0);
-        computeModelValue(a, 1);
-        Assert(d_mv[1][a].isConst());
-        Assert(d_mv[0][a].isConst());
-        Trace("nl-alg-mv") << "  " << a << " -> " << d_mv[1][a] << " ["
-                           << d_mv[0][a] << "]" << std::endl;
-
-        std::map<Node, std::vector<Node> >::iterator itvl = d_m_vlist.find(a);
-        Assert(itvl != d_m_vlist.end());
-        for (unsigned k = 0; k < itvl->second.size(); k++) {
-          if (std::find(ms_vars.begin(), ms_vars.end(), itvl->second[k]) ==
-              ms_vars.end()) {
-            ms_vars.push_back(itvl->second[k]);
-          }
-        }
-        /*
-        //mark processed if has a "one" factor (will look at reduced monomial)
-        std::map< Node, std::map< Node, unsigned > >::iterator itme =
-        d_m_exp.find( a ); Assert( itme!=d_m_exp.end() ); for( std::map< Node,
-        unsigned >::iterator itme2 = itme->second.begin(); itme2 !=
-        itme->second.end(); ++itme2 ){ Node v = itme->first; Assert(
-        d_mv[0].find( v )!=d_mv[0].end() ); Node mvv = d_mv[0][ v ]; if(
-        mvv==d_one || mvv==d_neg_one ){ ms_proc[ a ] = true;
-        Trace("nl-alg-mv")
-        << "...mark " << a << " reduced since has 1 factor." << std::endl;
-            break;
-          }
-        }
-        */
-      }
-
-      // register constants
-      registerMonomial(d_one);
-      for (unsigned j = 0; j < d_order_points.size(); j++) {
-        Node c = d_order_points[j];
-        computeModelValue(c, 0);
-        computeModelValue(c, 1);
-      }
-
-      int lemmas_proc;
-      std::vector<Node> lemmas;
-
-      // register variables (possibly do zero splits)
-      Trace("nl-alg-mv") << "Variables : " << std::endl;
-      Trace("nl-alg") << "Get zero split lemmas..." << std::endl;
-      for (unsigned i = 0; i < ms_vars.size(); i++) {
-        Node v = ms_vars[i];
-        registerMonomial(v);
-        computeModelValue(v, 0);
-        computeModelValue(v, 1);
-        Trace("nl-alg-mv") << "  " << v << " -> " << d_mv[0][v] << std::endl;
-        if (options::nlAlgSplitZero()) {
-          // split on zero?
-          if (d_zero_split.find(v) == d_zero_split.end()) {
-            d_zero_split.insert(v);
-            Node lem = v.eqNode(d_zero);
-            lem = Rewriter::rewrite(lem);
-            d_containing.getValuation().ensureLiteral(lem);
-            d_containing.getOutputChannel().requirePhase(lem, true);
-            lem = NodeManager::currentNM()->mkNode(kind::OR, lem, lem.negate());
-            lemmas.push_back(lem);
-          }
-        }
-      }
-      lemmas_proc = flushLemmas(lemmas);
-      if (lemmas_proc > 0) {
-        Trace("nl-alg") << "  ...finished with " << lemmas_proc
-                        << " new lemmas." << std::endl;
-        return;
-      }
-
-      //------------------------------------------------------------------------lemmas
-      // based on sign (comparison to zero)
-      std::map<Node, int> signs;
-      Trace("nl-alg") << "Get sign lemmas..." << std::endl;
-      for (unsigned j = 0; j < ms.size(); j++) {
-        Node a = ms[j];
-        if (ms_proc.find(a) == ms_proc.end()) {
-          std::vector<Node> exp;
-          Trace("nl-alg-debug") << "  process " << a << "..." << std::endl;
-          signs[a] = compareSign(a, a, 0, 1, exp, lemmas);
-          if (signs[a] == 0) {
-            ms_proc[a] = true;
-            Trace("nl-alg-mv") << "...mark " << a
-                               << " reduced since its value is 0." << std::endl;
-          }
-        }
-      }
-      lemmas_proc = flushLemmas(lemmas);
-      if (lemmas_proc > 0) {
-        Trace("nl-alg") << "  ...finished with " << lemmas_proc
-                        << " new lemmas." << std::endl;
-        return;
-      }
-
-      //---------------------------------------------------------------------lemmas
-      // based on magnitude of non-zero monomials
-      for (unsigned r = 1; r <= 1; r++) {
-        assignOrderIds(ms_vars, d_order_vars[r], r);
-
-        // sort individual variable lists
-        SortNonlinearExtension smv;
-        smv.d_nla = this;
-        smv.d_order_type = r;
-        smv.d_reverse_order = true;
-        for (unsigned j = 0; j < ms.size(); j++) {
-          std::sort(d_m_vlist[ms[j]].begin(), d_m_vlist[ms[j]].end(), smv);
-        }
-        for (unsigned c = 0; c < 3; c++) {
-          // if (x,y,L) in cmp_infers, then x > y inferred as conclusion of L
-          // in lemmas
-          std::map<int, std::map<Node, std::map<Node, Node> > > cmp_infers;
-          Trace("nl-alg") << "Get comparison lemmas (order=" << r
-                          << ", compare=" << c << ")..." << std::endl;
-          for (unsigned j = 0; j < ms.size(); j++) {
-            Node a = ms[j];
-            if (ms_proc.find(a) == ms_proc.end()) {
-              if (c == 0) {
-                // compare magnitude against 1
-                std::vector<Node> exp;
-                NodeMultiset a_exp_proc;
-                NodeMultiset b_exp_proc;
-                compareMonomial(a, a, a_exp_proc, d_one, d_one, b_exp_proc, exp,
-                                lemmas, cmp_infers);
-              } else {
-                std::map<Node, NodeMultiset>::iterator itmea = d_m_exp.find(a);
-                Assert(itmea != d_m_exp.end());
-                if (c == 1) {
-                  // TODO : not just against containing variables?
-                  // compare magnitude against variables
-                  for (unsigned k = 0; k < ms_vars.size(); k++) {
-                    Node v = ms_vars[k];
-                    std::vector<Node> exp;
-                    NodeMultiset a_exp_proc;
-                    NodeMultiset b_exp_proc;
-                    if (itmea->second.find(v) != itmea->second.end()) {
-                      a_exp_proc[v] = 1;
-                      b_exp_proc[v] = 1;
-                      setMonomialFactor(a, v, a_exp_proc);
-                      setMonomialFactor(v, a, b_exp_proc);
-                      compareMonomial(a, a, a_exp_proc, v, v, b_exp_proc, exp,
-                                      lemmas, cmp_infers);
-                    }
-                  }
-                } else {
-                  // compare magnitude against other non-linear monomials
-                  for (unsigned k = (j + 1); k < ms.size(); k++) {
-                    Node b = ms[k];
-                    //(signs[a]==signs[b])==(r==0)
-                    if (ms_proc.find(b) == ms_proc.end()) {
-                      std::map<Node, NodeMultiset>::iterator itmeb =
-                          d_m_exp.find(b);
-                      Assert(itmeb != d_m_exp.end());
-
-                      std::vector<Node> exp;
-                      // take common factors of monomials, set minimum of
-                      // common exponents as processed
-                      NodeMultiset a_exp_proc;
-                      NodeMultiset b_exp_proc;
-                      for (NodeMultiset::iterator itmea2 =
-                               itmea->second.begin();
-                           itmea2 != itmea->second.end(); ++itmea2) {
-                        NodeMultiset::iterator itmeb2 =
-                            itmeb->second.find(itmea2->first);
-                        if (itmeb2 != itmeb->second.end()) {
-                          unsigned min_exp = itmea2->second > itmeb2->second
-                                                 ? itmeb2->second
-                                                 : itmea2->second;
-                          a_exp_proc[itmea2->first] = min_exp;
-                          b_exp_proc[itmea2->first] = min_exp;
-                          Trace("nl-alg-comp")
-                              << "Common exponent : " << itmea2->first << " : "
-                              << min_exp << std::endl;
-                        }
-                      }
-                      if (!a_exp_proc.empty()) {
-                        setMonomialFactor(a, b, a_exp_proc);
-                        setMonomialFactor(b, a, b_exp_proc);
-                      }
-                      /*
-                      if( !a_exp_proc.empty() ){
-                        //reduction based on common exponents a > 0 => ( a * b
-                      <> a * c <=> b <> c ), a < 0 => ( a * b <> a * c <=> b
-                      !<> c )  ? }else{ compareMonomial( a, a, a_exp_proc, b,
-                      b, b_exp_proc, exp, lemmas );
-                      }
-                      */
-                      compareMonomial(a, a, a_exp_proc, b, b, b_exp_proc, exp,
-                                      lemmas, cmp_infers);
-                    }
-                  }
-                }
-              }
-            }
-          }
-          // remove redundant lemmas, e.g. if a > b, b > c, a > c were
-          // inferred, discard lemma with conclusion a > c
-          Trace("nl-alg-comp") << "Compute redundancies for " << lemmas.size()
-                               << " lemmas." << std::endl;
-          // naive
-          std::vector<Node> r_lemmas;
-          for (std::map<int, std::map<Node, std::map<Node, Node> > >::iterator
-                   itb = cmp_infers.begin();
-               itb != cmp_infers.end(); ++itb) {
-            for (std::map<Node, std::map<Node, Node> >::iterator itc =
-                     itb->second.begin();
-                 itc != itb->second.end(); ++itc) {
-              for (std::map<Node, Node>::iterator itc2 = itc->second.begin();
-                   itc2 != itc->second.end(); ++itc2) {
-                std::map<Node, bool> visited;
-                for (std::map<Node, Node>::iterator itc3 = itc->second.begin();
-                     itc3 != itc->second.end(); ++itc3) {
-                  if (itc3->first != itc2->first) {
-                    std::vector<Node> exp;
-                    if (cmp_holds(itc3->first, itc2->first, itb->second, exp,
-                                  visited)) {
-                      r_lemmas.push_back(itc2->second);
-                      Trace("nl-alg-comp")
-                          << "...inference of " << itc->first << " > "
-                          << itc2->first << " was redundant." << std::endl;
-                      break;
-                    }
-                  }
-                }
-              }
-            }
-          }
-          std::vector<Node> nr_lemmas;
-          for (unsigned i = 0; i < lemmas.size(); i++) {
-            if (std::find(r_lemmas.begin(), r_lemmas.end(), lemmas[i]) ==
-                r_lemmas.end()) {
-              nr_lemmas.push_back(lemmas[i]);
-            }
-          }
-          // TODO: only take maximal lower/minimial lower bounds?
-
-          Trace("nl-alg-comp") << nr_lemmas.size() << " / " << lemmas.size()
-                               << " were non-redundant." << std::endl;
-          lemmas_proc = flushLemmas(nr_lemmas);
-          if (lemmas_proc > 0) {
-            Trace("nl-alg") << "  ...finished with " << lemmas_proc
-                            << " new lemmas (out of possible " << lemmas.size()
-                            << ")." << std::endl;
-            return;
-          }
-        }
-      }
-
-      // sort monomials by degree
-      SortNonlinearExtension snlad;
-      snlad.d_nla = this;
-      snlad.d_order_type = 4;
-      snlad.d_reverse_order = false;
-      std::sort(ms.begin(), ms.end(), snlad);
-      // all monomials
-      std::vector<Node> terms;
-      terms.insert(terms.end(), ms_vars.begin(), ms_vars.end());
-      terms.insert(terms.end(), ms.begin(), ms.end());
-
-      // term -> coeff -> rhs -> ( status, exp, b ),
-      //   where we have that : exp =>  ( coeff * term <status> rhs )
-      //   b is true if degree( term ) >= degree( rhs )
-      std::map<Node, std::map<Node, std::map<Node, Kind> > > ci;
-      std::map<Node, std::map<Node, std::map<Node, Node> > > ci_exp;
-      std::map<Node, std::map<Node, std::map<Node, bool> > > ci_max;
-
-      // If ( m, p1, true ), then it would help satisfiability if m were ( >
-      // if p1=true, < if p1=false )
-      std::map<Node, std::map<bool, bool> > tplane_refine_dir;
-
-      // register constraints
-      Trace("nl-alg-debug") << "Register bound constraints..." << std::endl;
-      for (context::CDList<Assertion>::const_iterator it =
-               d_containing.facts_begin();
-           it != d_containing.facts_end(); ++it) {
-        Node lit = (*it).assertion;
-        bool polarity = lit.getKind() != kind::NOT;
-        Node atom = lit.getKind() == kind::NOT ? lit[0] : lit;
-        registerConstraint(atom);
-        bool is_false_lit = false_asserts.find(lit) != false_asserts.end();
-        // add information about bounds to variables
-        std::map<Node, std::map<Node, ConstraintInfo> >::iterator itc =
-            d_c_info.find(atom);
-        std::map<Node, std::map<Node, bool> >::iterator itcm =
-            d_c_info_maxm.find(atom);
-        if (itc != d_c_info.end()) {
-          Assert(itcm != d_c_info_maxm.end());
-          for (std::map<Node, ConstraintInfo>::iterator itcc =
-                   itc->second.begin();
-               itcc != itc->second.end(); ++itcc) {
-            Node x = itcc->first;
-            Node coeff = itcc->second.d_coeff;
-            Node rhs = itcc->second.d_rhs;
-            Kind type = itcc->second.d_type;
-            Node exp = lit;
-            if (!polarity) {
-              // reverse
-              if (type == kind::EQUAL) {
-                // we will take the strict inequality in the direction of the
-                // model
-                Node lhs = QuantArith::mkCoeffTerm(coeff, x);
-                Node query =
-                    NodeManager::currentNM()->mkNode(kind::GT, lhs, rhs);
-                Node query_mv = computeModelValue(query, 1);
-                if (query_mv == d_true) {
-                  exp = query;
-                  type = kind::GT;
-                } else {
-                  Assert(query_mv == d_false);
-                  exp = NodeManager::currentNM()->mkNode(kind::LT, lhs, rhs);
-                  type = kind::LT;
-                }
-              } else {
-                type = negateKind(type);
-              }
-            }
-            // add to status if maximal degree
-            ci_max[x][coeff][rhs] = itcm->second.find(x) != itcm->second.end();
-            if (Trace.isOn("nl-alg-bound-debug2")) {
-              Node t = QuantArith::mkCoeffTerm(coeff, x);
-              Trace("nl-alg-bound-debug2")
-                  << "Add Bound: " << t << " " << type << " " << rhs << " by "
-                  << exp << std::endl;
-            }
-            bool updated = true;
-            std::map<Node, Kind>::iterator its = ci[x][coeff].find(rhs);
-            if (its == ci[x][coeff].end()) {
-              ci[x][coeff][rhs] = type;
-              ci_exp[x][coeff][rhs] = exp;
-            } else if (type != its->second) {
-              Trace("nl-alg-bound-debug2") << "Joining kinds : " << type << " "
-                                           << its->second << std::endl;
-              Kind jk = joinKinds(type, its->second);
-              if (jk == kind::UNDEFINED_KIND) {
-                updated = false;
-              } else if (jk != its->second) {
-                if (jk == type) {
-                  ci[x][coeff][rhs] = type;
-                  ci_exp[x][coeff][rhs] = exp;
-                } else {
-                  ci[x][coeff][rhs] = jk;
-                  ci_exp[x][coeff][rhs] = NodeManager::currentNM()->mkNode(
-                      kind::AND, ci_exp[x][coeff][rhs], exp);
-                }
-              } else {
-                updated = false;
-              }
-            }
-            if (Trace.isOn("nl-alg-bound")) {
-              if (updated) {
-                Trace("nl-alg-bound") << "Bound: ";
-                debugPrintBound("nl-alg-bound", coeff, x, ci[x][coeff][rhs],
-                                rhs);
-                Trace("nl-alg-bound") << " by " << ci_exp[x][coeff][rhs];
-                if (ci_max[x][coeff][rhs]) {
-                  Trace("nl-alg-bound") << ", is max degree";
-                }
-                Trace("nl-alg-bound") << std::endl;
-              }
-            }
-            // compute if bound is not satisfied, and store what is required
-            // for a possible refinement
-            if (options::nlAlgTangentPlanes()) {
-              if (is_false_lit) {
-                Node rhs_v = computeModelValue(rhs, 0);
-                Node x_v = computeModelValue(x, 0);
-                bool needsRefine = false;
-                bool refineDir;
-                if (rhs_v == x_v) {
-                  if (type == kind::GT) {
-                    needsRefine = true;
-                    refineDir = true;
-                  } else if (type == kind::LT) {
-                    needsRefine = true;
-                    refineDir = false;
-                  }
-                } else if (x_v.getConst<Rational>() >
-                           rhs_v.getConst<Rational>()) {
-                  if (type != kind::GT && type != kind::GEQ) {
-                    needsRefine = true;
-                    refineDir = false;
-                  }
-                } else {
-                  if (type != kind::LT && type != kind::LEQ) {
-                    needsRefine = true;
-                    refineDir = true;
-                  }
-                }
-                Trace("nl-alg-tplanes-cons-debug")
-                    << "...compute if bound corresponds to a required "
-                       "refinement"
-                    << std::endl;
-                Trace("nl-alg-tplanes-cons-debug")
-                    << "...M[" << x << "] = " << x_v << ", M[" << rhs
-                    << "] = " << rhs_v << std::endl;
-                Trace("nl-alg-tplanes-cons-debug")
-                    << "...refine = " << needsRefine << "/" << refineDir
-                    << std::endl;
-                if (needsRefine) {
-                  Trace("nl-alg-tplanes-cons")
-                      << "---> By " << lit << " and since M[" << x
-                      << "] = " << x_v << ", M[" << rhs << "] = " << rhs_v
-                      << ", ";
-                  Trace("nl-alg-tplanes-cons")
-                      << "monomial " << x << " should be "
-                      << (refineDir ? "larger" : "smaller") << std::endl;
-                  tplane_refine_dir[x][refineDir] = true;
-                }
-              }
-            }
-          }
-        }
-      }
-      // reflexive constraints
-      Node null_coeff;
-      for (unsigned j = 0; j < terms.size(); j++) {
-        Node n = terms[j];
-        ci[n][null_coeff][n] = kind::EQUAL;
-        ci_exp[n][null_coeff][n] = d_true;
-        ci_max[n][null_coeff][n] = false;
-      }
-
-      //-----------------------------------------------------------------------------------------inferred
-      // bounds lemmas, e.g. x >= t => y*x >= y*t
-      Trace("nl-alg") << "Get inferred bound lemmas..." << std::endl;
-
-      std::vector<Node> nt_lemmas;
-      for (unsigned k = 0; k < terms.size(); k++) {
-        Node x = terms[k];
-        Trace("nl-alg-bound-debug")
-            << "Process bounds for " << x << " : " << std::endl;
-        std::map<Node, std::vector<Node> >::iterator itm =
-            d_m_contain_parent.find(x);
-        if (itm != d_m_contain_parent.end()) {
-          Trace("nl-alg-bound-debug") << "...has " << itm->second.size()
-                                      << " parent monomials." << std::endl;
-          // check derived bounds
-          std::map<Node, std::map<Node, std::map<Node, Kind> > >::iterator itc =
-              ci.find(x);
-          if (itc != ci.end()) {
-            for (std::map<Node, std::map<Node, Kind> >::iterator itcc =
-                     itc->second.begin();
-                 itcc != itc->second.end(); ++itcc) {
-              Node coeff = itcc->first;
-              Node t = QuantArith::mkCoeffTerm(coeff, x);
-              for (std::map<Node, Kind>::iterator itcr = itcc->second.begin();
-                   itcr != itcc->second.end(); ++itcr) {
-                Node rhs = itcr->first;
-                // only consider this bound if maximal degree
-                if (ci_max[x][coeff][rhs]) {
-                  Kind type = itcr->second;
-                  for (unsigned j = 0; j < itm->second.size(); j++) {
-                    Node y = itm->second[j];
-                    Assert(d_m_contain_mult[x].find(y) !=
-                           d_m_contain_mult[x].end());
-                    Node mult = d_m_contain_mult[x][y];
-                    // x <k> t => m*x <k'> t  where y = m*x
-                    // get the sign of mult
-                    Node mmv = computeModelValue(mult);
-                    Trace("nl-alg-bound-debug2") << "Model value of " << mult
-                                                 << " is " << mmv << std::endl;
-                    Assert(mmv.isConst());
-                    int mmv_sign = mmv.getConst<Rational>().sgn();
-                    Trace("nl-alg-bound-debug2")
-                        << "  sign of " << mmv << " is " << mmv_sign
-                        << std::endl;
-                    if (mmv_sign != 0) {
-                      Trace("nl-alg-bound-debug")
-                          << "  from " << x << " * " << mult << " = " << y
-                          << " and " << t << " " << type << " " << rhs
-                          << ", infer : " << std::endl;
-                      Kind infer_type =
-                          mmv_sign == -1 ? reverseRelationKind(type) : type;
-                      Node infer_lhs =
-                          NodeManager::currentNM()->mkNode(kind::MULT, mult, t);
-                      Node infer_rhs = NodeManager::currentNM()->mkNode(
-                          kind::MULT, mult, rhs);
-                      Node infer = NodeManager::currentNM()->mkNode(
-                          infer_type, infer_lhs, infer_rhs);
-                      Trace("nl-alg-bound-debug")
-                          << "     " << infer << std::endl;
-                      infer = Rewriter::rewrite(infer);
-                      Trace("nl-alg-bound-debug2")
-                          << "     ...rewritten : " << infer << std::endl;
-                      // check whether it is false in model for abstraction
-                      Node infer_mv = computeModelValue(infer, 1);
-                      Trace("nl-alg-bound-debug")
-                          << "       ...infer model value is " << infer_mv
-                          << std::endl;
-                      if (infer_mv == d_false) {
-                        Node exp = NodeManager::currentNM()->mkNode(
-                            kind::AND,
-                            NodeManager::currentNM()->mkNode(
-                                mmv_sign == 1 ? kind::GT : kind::LT, mult,
-                                d_zero),
-                            ci_exp[x][coeff][rhs]);
-                        Node iblem = NodeManager::currentNM()->mkNode(
-                            kind::IMPLIES, exp, infer);
-                        Node pr_iblem = iblem;
-                        iblem = Rewriter::rewrite(iblem);
-                        bool introNewTerms = hasNewMonomials(iblem, ms);
-                        Trace("nl-alg-bound-lemma")
-                            << "*** Bound inference lemma : " << iblem
-                            << " (pre-rewrite : " << pr_iblem << ")"
-                            << std::endl;
-                        // Trace("nl-alg-bound-lemma") << "       intro new
-                        // monomials = " << introNewTerms << std::endl;
-                        if (!introNewTerms) {
-                          lemmas.push_back(iblem);
-                        } else {
-                          nt_lemmas.push_back(iblem);
-                        }
-                      }
-                    } else {
-                      Trace("nl-alg-bound-debug")
-                          << "     ...coefficient " << mult << " is zero."
-                          << std::endl;
-                    }
-                  }
-                }
-              }
-            }
-          }
-        } else {
-          Trace("nl-alg-bound-debug")
-              << "...has no parent monomials." << std::endl;
-        }
-      }
-      // Trace("nl-alg") << "Bound lemmas : " << lemmas.size() << ", " <<
-      // nt_lemmas.size() << std::endl;  prioritize lemmas that do not
-      // introduce new monomials
-      lemmas_proc = flushLemmas(lemmas);
-      if (lemmas_proc > 0) {
-        Trace("nl-alg") << "  ...finished with " << lemmas_proc
-                        << " new lemmas." << std::endl;
-        return;
-      }
-
-      //------------------------------------resolution bound inferences, e.g.
-      //(
-      // y>=0 ^ s <= x*z ^ x*y <= t ) => y*s <= z*t
-      if (options::nlAlgResBound()) {
-        Trace("nl-alg") << "Get resolution inferred bound lemmas..."
-                        << std::endl;
-        for (unsigned j = 0; j < terms.size(); j++) {
-          Node a = terms[j];
-          std::map<Node, std::map<Node, std::map<Node, Kind> > >::iterator
-              itca = ci.find(a);
-          if (itca != ci.end()) {
-            for (unsigned k = (j + 1); k < terms.size(); k++) {
-              Node b = terms[k];
-              std::map<Node, std::map<Node, std::map<Node, Kind> > >::iterator
-                  itcb = ci.find(b);
-              if (itcb != ci.end()) {
-                Trace("nl-alg-rbound-debug")
-                    << "resolution inferences : compare " << a << " and " << b
-                    << std::endl;
-                // if they have common factors
-                std::map<Node, Node>::iterator ita = d_mono_diff[a].find(b);
-                if (ita != d_mono_diff[a].end()) {
-                  std::map<Node, Node>::iterator itb = d_mono_diff[b].find(a);
-                  Assert(itb != d_mono_diff[b].end());
-                  Node mv_a = computeModelValue(ita->second, 1);
-                  Assert(mv_a.isConst());
-                  int mv_a_sgn = mv_a.getConst<Rational>().sgn();
-                  Assert(mv_a_sgn != 0);
-                  Node mv_b = computeModelValue(itb->second, 1);
-                  Assert(mv_b.isConst());
-                  int mv_b_sgn = mv_b.getConst<Rational>().sgn();
-                  Assert(mv_b_sgn != 0);
-                  Trace("nl-alg-rbound") << "Get resolution inferences for [a] "
-                                         << a << " vs [b] " << b << std::endl;
-                  Trace("nl-alg-rbound")
-                      << "  [a] factor is " << ita->second
-                      << ", sign in model = " << mv_a_sgn << std::endl;
-                  Trace("nl-alg-rbound")
-                      << "  [b] factor is " << itb->second
-                      << ", sign in model = " << mv_b_sgn << std::endl;
-
-                  std::vector<Node> exp;
-                  // bounds of a
-                  for (std::map<Node, std::map<Node, Kind> >::iterator itcac =
-                           itca->second.begin();
-                       itcac != itca->second.end(); ++itcac) {
-                    Node coeff_a = itcac->first;
-                    for (std::map<Node, Kind>::iterator itcar =
-                             itcac->second.begin();
-                         itcar != itcac->second.end(); ++itcar) {
-                      Node rhs_a = itcar->first;
-                      Node rhs_a_res_base = NodeManager::currentNM()->mkNode(
-                          kind::MULT, itb->second, rhs_a);
-                      rhs_a_res_base = Rewriter::rewrite(rhs_a_res_base);
-                      if (!hasNewMonomials(rhs_a_res_base, ms)) {
-                        Kind type_a = itcar->second;
-                        exp.push_back(ci_exp[a][coeff_a][rhs_a]);
-
-                        // bounds of b
-                        for (std::map<Node, std::map<Node, Kind> >::iterator
-                                 itcbc = itcb->second.begin();
-                             itcbc != itcb->second.end(); ++itcbc) {
-                          Node coeff_b = itcbc->first;
-                          Node rhs_a_res =
-                              QuantArith::mkCoeffTerm(coeff_b, rhs_a_res_base);
-                          for (std::map<Node, Kind>::iterator itcbr =
-                                   itcbc->second.begin();
-                               itcbr != itcbc->second.end(); ++itcbr) {
-                            Node rhs_b = itcbr->first;
-                            Node rhs_b_res = NodeManager::currentNM()->mkNode(
-                                kind::MULT, ita->second, rhs_b);
-                            rhs_b_res =
-                                QuantArith::mkCoeffTerm(coeff_a, rhs_b_res);
-                            rhs_b_res = Rewriter::rewrite(rhs_b_res);
-                            if (!hasNewMonomials(rhs_b_res, ms)) {
-                              Kind type_b = itcbr->second;
-                              exp.push_back(ci_exp[b][coeff_b][rhs_b]);
-                              if (Trace.isOn("nl-alg-rbound")) {
-                                Trace("nl-alg-rbound") << "* try bounds : ";
-                                debugPrintBound("nl-alg-rbound", coeff_a, a,
-                                                type_a, rhs_a);
-                                Trace("nl-alg-rbound") << std::endl;
-                                Trace("nl-alg-rbound") << "               ";
-                                debugPrintBound("nl-alg-rbound", coeff_b, b,
-                                                type_b, rhs_b);
-                                Trace("nl-alg-rbound") << std::endl;
-                              }
-                              Kind types[2];
-                              for (unsigned r = 0; r < 2; r++) {
-                                Node pivot_factor =
-                                    r == 0 ? itb->second : ita->second;
-                                int pivot_factor_sign =
-                                    r == 0 ? mv_b_sgn : mv_a_sgn;
-                                types[r] = r == 0 ? type_a : type_b;
-                                if (pivot_factor_sign == (r == 0 ? 1 : -1)) {
-                                  types[r] = reverseRelationKind(types[r]);
-                                }
-                                if (pivot_factor_sign == 1) {
-                                  exp.push_back(
-                                      NodeManager::currentNM()->mkNode(
-                                          kind::GT, pivot_factor, d_zero));
-                                } else {
-                                  exp.push_back(
-                                      NodeManager::currentNM()->mkNode(
-                                          kind::LT, pivot_factor, d_zero));
-                                }
-                              }
-                              Kind jk = transKinds(types[0], types[1]);
-                              Trace("nl-alg-rbound-debug")
-                                  << "trans kind : " << types[0] << " + "
-                                  << types[1] << " = " << jk << std::endl;
-                              if (jk != kind::UNDEFINED_KIND) {
-                                Node conc = NodeManager::currentNM()->mkNode(
-                                    jk, rhs_a_res, rhs_b_res);
-                                Node conc_mv = computeModelValue(conc, 1);
-                                if (conc_mv == d_false) {
-                                  Node rblem = NodeManager::currentNM()->mkNode(
-                                      kind::IMPLIES,
-                                      NodeManager::currentNM()->mkNode(
-                                          kind::AND, exp),
-                                      conc);
-                                  Trace("nl-alg-rbound-lemma-debug")
-                                      << "Resolution bound lemma "
-                                         "(pre-rewrite) "
-                                         ": "
-                                      << rblem << std::endl;
-                                  rblem = Rewriter::rewrite(rblem);
-                                  Trace("nl-alg-rbound-lemma")
-                                      << "Resolution bound lemma : " << rblem
-                                      << std::endl;
-                                  lemmas.push_back(rblem);
-                                }
-                              }
-                              exp.pop_back();
-                              exp.pop_back();
-                              exp.pop_back();
-                            }
-                          }
-                        }
-                        exp.pop_back();
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-        lemmas_proc = flushLemmas(lemmas);
-        if (lemmas_proc > 0) {
-          Trace("nl-alg") << "  ...finished with " << lemmas_proc
-                          << " new lemmas." << std::endl;
-          return;
-        }
-      }
-
-      // from inferred bound inferences
-      lemmas_proc = flushLemmas(nt_lemmas);
-      if (lemmas_proc > 0) {
-        Trace("nl-alg") << "  ...finished with " << lemmas_proc
-                        << " new (monomial-introducing) lemmas." << std::endl;
-        return;
-      }
-
-      if (options::nlAlgTangentPlanes()) {
-        Trace("nl-alg") << "Get tangent plane lemmas..." << std::endl;
-        unsigned kstart = ms_vars.size();
-        for (unsigned k = kstart; k < terms.size(); k++) {
-          Node t = terms[k];
-          // if this term requires a refinement
-          if (tplane_refine_dir.find(t) != tplane_refine_dir.end()) {
-            Trace("nl-alg-tplanes")
-                << "Look at monomial requiring refinement : " << t << std::endl;
-            // get a decomposition
-            std::map<Node, std::vector<Node> >::iterator it =
-                d_m_contain_children.find(t);
-            if (it != d_m_contain_children.end()) {
-              std::map<Node, std::map<Node, bool> > dproc;
-              for (unsigned j = 0; j < it->second.size(); j++) {
-                Node tc = it->second[j];
-                if (tc != d_one) {
-                  Node tc_diff = d_m_contain_umult[tc][t];
-                  Assert(!tc_diff.isNull());
-                  Node a = tc < tc_diff ? tc : tc_diff;
-                  Node b = tc < tc_diff ? tc_diff : tc;
-                  if (dproc[a].find(b) == dproc[a].end()) {
-                    dproc[a][b] = true;
-                    Trace("nl-alg-tplanes") << "  decomposable into : " << a
-                                            << " * " << b << std::endl;
-                    Node a_v = computeModelValue(a, 1);
-                    Node b_v = computeModelValue(b, 1);
-                    // tangent plane
-                    Node tplane = NodeManager::currentNM()->mkNode(
-                        kind::MINUS,
-                        NodeManager::currentNM()->mkNode(
-                            kind::PLUS,
-                            NodeManager::currentNM()->mkNode(kind::MULT, b_v,
-                                                             a),
-                            NodeManager::currentNM()->mkNode(kind::MULT, a_v,
-                                                             b)),
-                        NodeManager::currentNM()->mkNode(kind::MULT, a_v, b_v));
-                    for (unsigned d = 0; d < 4; d++) {
-                      Node aa = NodeManager::currentNM()->mkNode(
-                          d == 0 || d == 3 ? kind::GEQ : kind::LEQ, a, a_v);
-                      Node ab = NodeManager::currentNM()->mkNode(
-                          d == 1 || d == 3 ? kind::GEQ : kind::LEQ, b, b_v);
-                      Node conc = NodeManager::currentNM()->mkNode(
-                          d <= 1 ? kind::LEQ : kind::GEQ, t, tplane);
-                      Node tlem = NodeManager::currentNM()->mkNode(
-                          kind::OR, aa.negate(), ab.negate(), conc);
-                      Trace("nl-alg-tplanes")
-                          << "Tangent plane lemma : " << tlem << std::endl;
-                      lemmas.push_back(tlem);
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-        Trace("nl-alg") << "...trying " << lemmas.size()
-                        << " tangent plane lemmas..." << std::endl;
-        lemmas_proc = flushLemmas(lemmas);
-        if (lemmas_proc > 0) {
-          Trace("nl-alg") << "  ...finished with " << lemmas_proc
-                          << " new lemmas." << std::endl;
-          return;
-        }
-      }
-
-      Trace("nl-alg") << "...set incomplete" << std::endl;
-      d_containing.getOutputChannel().setIncomplete();
+    d_mv[0].clear();
+    d_mv[1].clear();
+    const std::vector<Node> assertions(d_containing.facts_begin(),
+                                       d_containing.facts_end());
+    const std::set<Node> false_asserts = getFalseInModel(assertions);
+    if (!false_asserts.empty()) {
+      checkLastCall(assertions, false_asserts);
     }
   }
 }
@@ -1907,9 +1908,9 @@ int NonlinearExtension::compareSign(Node oa, Node a, unsigned a_index,
   Assert(d_mv[1].find(oa) != d_mv[1].end());
   if (a_index == d_m_vlist[a].size()) {
     if (d_mv[1][oa].getConst<Rational>().sgn() != status) {
-      lem.push_back(NodeManager::currentNM()->mkNode(
-          kind::IMPLIES, safeConstructNary(kind::AND, exp),
-          mkLit(oa, d_zero, status * 2)));
+      Node lemma = safeConstructNary(kind::AND, exp)
+                       .impNode(mkLit(oa, d_zero, status * 2));
+      lem.push_back(lemma);
     }
     return status;
   } else {
@@ -1923,8 +1924,8 @@ int NonlinearExtension::compareSign(Node oa, Node a, unsigned a_index,
                           << ", model sign = " << sgn << std::endl;
     if (sgn == 0) {
       if (d_mv[1][oa].getConst<Rational>().sgn() != 0) {
-        lem.push_back(NodeManager::currentNM()->mkNode(
-            kind::IMPLIES, av.eqNode(d_zero), oa.eqNode(d_zero)));
+        Node lemma = av.eqNode(d_zero).impNode(oa.eqNode(d_zero));
+        lem.push_back(lemma);
       }
       return 0;
     } else {

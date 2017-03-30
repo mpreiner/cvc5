@@ -22,6 +22,7 @@
 
 #include <map>
 #include <queue>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -82,6 +83,14 @@ class NonlinearExtension {
     Kind d_type;
   }; /* struct ConstraintInfo */
 
+  // Check assertions for consistency in the effort LAST_CALL with a subset of
+  // the assertions, false_asserts, evaluate to false in the current model.
+  void checkLastCall(const std::vector<Node>& assertions,
+                     const std::set<Node>& false_asserts);
+
+  // Returns a vector containing a split on whether each term is 0 or not for
+  // those terms that have not been split on in the current context.
+  std::vector<Node> splitOnZeros(const std::vector<Node>& terms);
 
   static bool isArithKind(Kind k);
   static Node mkLit(Node a, Node b, int status, int orderType = 0);
@@ -101,6 +110,10 @@ class NonlinearExtension {
   Node get_compare_value(Node i, unsigned orderType) const;
   void assignOrderIds(std::vector<Node>& vars, NodeMultiset& d_order,
                       unsigned orderType);
+
+  // Returns the subset of assertions that evaluate to false in the model.
+  std::set<Node> getFalseInModel(const std::vector<Node>& assertions);
+
   // status
   // 0 : equal
   // 1 : greater than or equal
