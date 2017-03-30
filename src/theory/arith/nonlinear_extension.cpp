@@ -178,6 +178,28 @@ struct SortNonlinearExtension {
   }
 };
 
+bool hasNewMonomials(Node n, const std::vector<Node>& existing) {
+  std::set<Node> visited;
+
+  std::vector<Node> worklist;
+  worklist.push_back(n);
+  while (!worklist.empty()) {
+    Node current = worklist.back();
+    worklist.pop_back();
+    if (!Contains(visited, current)) {
+      visited.insert(current);
+      if (current.getKind() == kind::NONLINEAR_MULT) {
+        if (!IsInVector(existing, current)) {
+          return true;
+        }
+      } else {
+        worklist.insert(worklist.end(), current.begin(), current.end());
+      }
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 NonlinearExtension::NonlinearExtension(TheoryArith& containing,
@@ -519,8 +541,8 @@ bool NonLinearExtentionSubstitutionSolver::setSubstitutionConst(
     Node m = itn->first;
     Node r = d_ee->getRepresentative(m);
     if (!Contains(d_rep_to_const, r)) {
-      if (setSubstitutionConst(vars, r, itn->second, m, new_const_exp[m],
-                               subs, exp, rep_to_subs_index)) {
+      if (setSubstitutionConst(vars, r, itn->second, m, new_const_exp[m], subs,
+                               exp, rep_to_subs_index)) {
         retVal = true;
       }
     }
@@ -556,8 +578,7 @@ bool NonlinearExtension::getCurrentSubstitution(
 
   if (options::nlAlgSolveSubs()) {
     NonLinearExtentionSubstitutionSolver substitution_solver(d_ee);
-    if (substitution_solver.solve(vars, &subs, &exp,
-                                  &rep_to_subs_index)) {
+    if (substitution_solver.solve(vars, &subs, &exp, &rep_to_subs_index)) {
       retVal = true;
     }
   }
@@ -687,11 +708,13 @@ void NonlinearExtension::registerMonomial(Node n) {
 }
 
 void NonlinearExtension::setMonomialFactor(Node a, Node b,
-                                           NodeMultiset& common) {
-  if (d_mono_diff[a].find(b) == d_mono_diff[a].end()) {
+                                           const NodeMultiset& common) {
+  // Could not tell if this was being inserted intentionally or not.
+  std::map<Node, Node>& mono_diff_a = d_mono_diff[a];
+  if (!Contains(mono_diff_a, b)) {
     Trace("nl-alg-mono-factor")
         << "Set monomial factor for " << a << "/" << b << std::endl;
-    d_mono_diff[a][b] = mkMonomialRemFactor(a, common);
+    mono_diff_a[b] = mkMonomialRemFactor(a, common);
   }
 }
 
@@ -761,67 +784,47 @@ bool NonlinearExtension::isArithKind(Kind k) {
   return k == kind::PLUS || k == kind::MULT || k == kind::NONLINEAR_MULT;
 }
 
-Node NonlinearExtension::mkAnd(std::vector<Node>& a) {
-  if (a.empty()) {
-    return d_true;
-  } else if (a.size() == 1) {
-    return a[0];
-  } else {
-    return NodeManager::currentNM()->mkNode(kind::AND, a);
-  }
-}
-
 Node NonlinearExtension::mkLit(Node a, Node b, int status, int orderType) {
   if (status == 0) {
+    Node a_eq_b = a.eqNode(b);
     if (orderType == 0) {
-      return a.eqNode(b);
+      return a_eq_b;
     } else {
       // return mkAbs( a ).eqNode( mkAbs( b ) );
-      return NodeManager::currentNM()->mkNode(
-          kind::OR, a.eqNode(b),
-          a.eqNode(NodeManager::currentNM()->mkNode(kind::UMINUS, b)));
+      Node negate_b = NodeManager::currentNM()->mkNode(kind::UMINUS, b);
+      return a_eq_b.orNode(a.eqNode(negate_b));
     }
   } else if (status < 0) {
     return mkLit(b, a, -status);
   } else {
     Assert(status == 1 || status == 2);
+    NodeManager* nm = NodeManager::currentNM();
+    Kind greater_op = status == 1 ? kind::GEQ : kind::GT;
     if (orderType == 0) {
-      return NodeManager::currentNM()->mkNode(
-          status == 1 ? kind::GEQ : kind::GT, a, b);
+      return nm->mkNode(greater_op, a, b);
     } else {
-      // return NodeManager::currentNM()->mkNode( status==1 ? kind::GEQ :
-      // kind::GT, mkAbs( a ), mkAbs( b ) );
-      return NodeManager::currentNM()->mkNode(
-          kind::ITE, NodeManager::currentNM()->mkNode(kind::GEQ, a, d_zero),
-          NodeManager::currentNM()->mkNode(
-              kind::ITE, NodeManager::currentNM()->mkNode(kind::GEQ, b, d_zero),
-              NodeManager::currentNM()->mkNode(
-                  status == 1 ? kind::GEQ : kind::GT, a, b),
-              NodeManager::currentNM()->mkNode(
-                  status == 1 ? kind::GEQ : kind::GT, a,
-                  NodeManager::currentNM()->mkNode(kind::UMINUS, b))),
-          NodeManager::currentNM()->mkNode(
-              kind::ITE, NodeManager::currentNM()->mkNode(kind::GEQ, b, d_zero),
-              NodeManager::currentNM()->mkNode(
-                  status == 1 ? kind::GEQ : kind::GT,
-                  NodeManager::currentNM()->mkNode(kind::UMINUS, a), b),
-              NodeManager::currentNM()->mkNode(
-                  status == 1 ? kind::GEQ : kind::LT, a, b)));
+      // return nm->mkNode( greater_op, mkAbs( a ), mkAbs( b ) );
+      Node zero = mkRationalNode(0);
+      Node a_is_nonnegative = nm->mkNode(kind::GEQ, a, zero);
+      Node b_is_nonnegative = nm->mkNode(kind::GEQ, b, zero);
+      Node negate_a = nm->mkNode(kind::UMINUS, a);
+      Node negate_b = nm->mkNode(kind::UMINUS, b);
+      return a_is_nonnegative.iteNode(
+          b_is_nonnegative.iteNode(nm->mkNode(greater_op, a, b),
+                                   nm->mkNode(greater_op, a, negate_b)),
+          b_is_nonnegative.iteNode(nm->mkNode(greater_op, negate_a, b),
+                                   nm->mkNode(greater_op, negate_a, negate_b)));
     }
   }
 }
 
 Node NonlinearExtension::mkAbs(Node a) {
   if (a.isConst()) {
-    if (a == d_one || a == d_zero) {
-      return a;
-    } else {
-      return NodeManager::currentNM()->mkConst(a.getConst<Rational>().abs());
-    }
+    return mkRationalNode(a.getConst<Rational>().abs());
   } else {
-    return NodeManager::currentNM()->mkNode(
-        kind::ITE, NodeManager::currentNM()->mkNode(kind::GEQ, a, d_zero), a,
-        NodeManager::currentNM()->mkNode(kind::UMINUS, a));
+    NodeManager* nm = NodeManager::currentNM();
+    Node a_is_nonnegative = nm->mkNode(kind::GEQ, a, mkRationalNode(0));
+    return a_is_nonnegative.iteNode(a, nm->mkNode(kind::UMINUS, a));
   }
 }
 
@@ -883,70 +886,44 @@ Kind NonlinearExtension::transKinds(Kind k1, Kind k2) {
   }
 }
 
-bool NonlinearExtension::hasNewMonomials(Node n, std::vector<Node>& existing,
-                                         std::map<Node, bool>& visited) {
-  if (visited.find(n) == visited.end()) {
-    visited[n] = true;
-    if (n.getKind() == kind::NONLINEAR_MULT) {
-      return !IsInVector(existing, n);
-    } else {
-      for (unsigned i = 0; i < n.getNumChildren(); i++) {
-        if (hasNewMonomials(n[i], existing, visited)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-Node NonlinearExtension::mkMonomialRemFactor(Node n, const NodeMultiset& n_exp_rem) const {
+Node NonlinearExtension::mkMonomialRemFactor(
+    Node n, const NodeMultiset& n_exp_rem) const {
   std::vector<Node> children;
-  std::map<Node, NodeMultiset>::const_iterator itme = d_m_exp.find(n);
-  Assert(itme != d_m_exp.end());
-  for (NodeMultiset::const_iterator itme2 = itme->second.begin();
-       itme2 != itme->second.end(); ++itme2) {
-    unsigned inc = itme2->second;
+  const NodeMultiset& exponent_map = getMonomialExponentMap(n);
+  for (NodeMultiset::const_iterator itme2 = exponent_map.begin();
+       itme2 != exponent_map.end(); ++itme2) {
     Node v = itme2->first;
+    unsigned inc = itme2->second;
     Trace("nl-alg-mono-factor")
         << "..." << inc << " factors of " << v << std::endl;
-    NodeMultiset::const_iterator itr = n_exp_rem.find(v);
-    if (itr != n_exp_rem.end()) {
-      Assert(itr->second <= inc);
-      inc = inc - itr->second;
-      Trace("nl-alg-mono-factor")
-          << "......rem, now " << inc << " factors of " << v << std::endl;
-    }
-    for (unsigned j = 0; j < inc; j++) {
-      children.push_back(v);
-    }
+    unsigned count_in_n_exp_rem = getCountWithDefault(n_exp_rem, v, 0);
+    Assert(count_in_n_exp_rem <= inc);
+    inc -= count_in_n_exp_rem;
+    Trace("nl-alg-mono-factor")
+        << "......rem, now " << inc << " factors of " << v << std::endl;
+    children.insert(children.end(), inc, v);
   }
-  Node ret = children.empty()
-                 ? d_one
-                 : (children.size() == 1 ? children[0]
-                                         : NodeManager::currentNM()->mkNode(
-                                               kind::MULT, children));
+  Node ret = safeConstructNary(kind::MULT, children);
   ret = Rewriter::rewrite(ret);
   Trace("nl-alg-mono-factor") << "...return : " << ret << std::endl;
   return ret;
 }
 
-bool NonlinearExtension::flushLemma(Node lem) {
+int NonlinearExtension::flushLemma(Node lem) {
   Trace("nl-alg-lemma-debug")
       << "NonlinearExtension::Lemma pre-rewrite : " << lem << std::endl;
   lem = Rewriter::rewrite(lem);
-  if (d_lemmas.find(lem) == d_lemmas.end()) {
-    d_lemmas.insert(lem);
-    Trace("nl-alg-lemma") << "NonlinearExtension::Lemma : " << lem << std::endl;
-    d_containing.getOutputChannel().lemma(lem);
-    return true;
-  } else {
+  if (Contains(d_lemmas, lem)) {
     Trace("nl-alg-lemma-debug")
         << "NonlinearExtension::Lemma duplicate : " << lem << std::endl;
     // should not generate duplicates
     // Assert( false );
-    return false;
+    return 0;
   }
+  d_lemmas.insert(lem);
+  Trace("nl-alg-lemma") << "NonlinearExtension::Lemma : " << lem << std::endl;
+  d_containing.getOutputChannel().lemma(lem);
+  return 1;
 }
 
 int NonlinearExtension::flushLemmas(std::vector<Node>& lemmas) {
@@ -975,9 +952,7 @@ int NonlinearExtension::flushLemmas(std::vector<Node>& lemmas) {
 
   int sum = 0;
   for (unsigned i = 0; i < lemmas.size(); i++) {
-    if (flushLemma(lemmas[i])) {
-      sum++;
-    }
+    sum += flushLemma(lemmas[i]);
   }
   lemmas.clear();
   return sum;
@@ -1542,9 +1517,7 @@ void NonlinearExtension::check(Theory::Effort e) {
                             kind::IMPLIES, exp, infer);
                         Node pr_iblem = iblem;
                         iblem = Rewriter::rewrite(iblem);
-                        std::map<Node, bool> visited;
-                        bool introNewTerms =
-                            hasNewMonomials(iblem, ms, visited);
+                        bool introNewTerms = hasNewMonomials(iblem, ms);
                         Trace("nl-alg-bound-lemma")
                             << "*** Bound inference lemma : " << iblem
                             << " (pre-rewrite : " << pr_iblem << ")"
@@ -1636,8 +1609,7 @@ void NonlinearExtension::check(Theory::Effort e) {
                       Node rhs_a_res_base = NodeManager::currentNM()->mkNode(
                           kind::MULT, itb->second, rhs_a);
                       rhs_a_res_base = Rewriter::rewrite(rhs_a_res_base);
-                      std::map<Node, bool> visited_a;
-                      if (!hasNewMonomials(rhs_a_res_base, ms, visited_a)) {
+                      if (!hasNewMonomials(rhs_a_res_base, ms)) {
                         Kind type_a = itcar->second;
                         exp.push_back(ci_exp[a][coeff_a][rhs_a]);
 
@@ -1657,8 +1629,7 @@ void NonlinearExtension::check(Theory::Effort e) {
                             rhs_b_res =
                                 QuantArith::mkCoeffTerm(coeff_a, rhs_b_res);
                             rhs_b_res = Rewriter::rewrite(rhs_b_res);
-                            std::map<Node, bool> visited_b;
-                            if (!hasNewMonomials(rhs_b_res, ms, visited_b)) {
+                            if (!hasNewMonomials(rhs_b_res, ms)) {
                               Kind type_b = itcbr->second;
                               exp.push_back(ci_exp[b][coeff_b][rhs_b]);
                               if (Trace.isOn("nl-alg-rbound")) {
@@ -1937,7 +1908,8 @@ int NonlinearExtension::compareSign(Node oa, Node a, unsigned a_index,
   if (a_index == d_m_vlist[a].size()) {
     if (d_mv[1][oa].getConst<Rational>().sgn() != status) {
       lem.push_back(NodeManager::currentNM()->mkNode(
-          kind::IMPLIES, mkAnd(exp), mkLit(oa, d_zero, status * 2)));
+          kind::IMPLIES, safeConstructNary(kind::AND, exp),
+          mkLit(oa, d_zero, status * 2)));
     }
     return status;
   } else {
@@ -2039,8 +2011,9 @@ bool NonlinearExtension::compareMonomial(
           exp.push_back(d_m_vlist[a][j].eqNode(d_zero).negate());
         }
       }
-      Node clem = NodeManager::currentNM()->mkNode(kind::IMPLIES, mkAnd(exp),
-                                                   mkLit(oa, ob, status, 1));
+      Node clem = NodeManager::currentNM()->mkNode(
+          kind::IMPLIES, safeConstructNary(kind::AND, exp),
+          mkLit(oa, ob, status, 1));
       Trace("nl-alg-comp-lemma") << "comparison lemma : " << clem << std::endl;
       lem.push_back(clem);
       cmp_infers[status][oa][ob] = clem;

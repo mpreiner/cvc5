@@ -83,19 +83,16 @@ class NonlinearExtension {
   }; /* struct ConstraintInfo */
 
 
-  bool isArithKind(Kind k);
-  Node mkAnd(std::vector<Node>& a);
-  Node mkLit(Node a, Node b, int status, int orderType = 0);
-  Node mkAbs(Node a);
-  Kind joinKinds(Kind k1, Kind k2);
-  Kind transKinds(Kind k1, Kind k2);
-  bool hasNewMonomials(Node n, std::vector<Node>& existing,
-                       std::map<Node, bool>& visited);
+  static bool isArithKind(Kind k);
+  static Node mkLit(Node a, Node b, int status, int orderType = 0);
+  static Node mkAbs(Node a);
+  static Kind joinKinds(Kind k1, Kind k2);
+  static Kind transKinds(Kind k1, Kind k2);
   Node mkMonomialRemFactor(Node n, const NodeMultiset& n_exp_rem) const;
 
   // register monomial
   void registerMonomial(Node n);
-  void setMonomialFactor(Node a, Node b, NodeMultiset& common);
+  void setMonomialFactor(Node a, Node b, const NodeMultiset& common);
 
   void registerConstraint(Node atom);
   // index = 0 : concrete, 1 : abstract
@@ -127,7 +124,14 @@ class NonlinearExtension {
                  std::vector<Node>& exp, std::map<Node, bool>& visited);
 
   bool isEntailed(Node n, bool pol);
-  bool flushLemma(Node lem);
+
+  // Potentially sends lem on the output channel if lem has not been sent on the
+  // output channel in this context. Returns the number of lemmas sent on the
+  // output channel.
+  int flushLemma(Node lem);
+
+  // Potentially sends lemmas to the output channel and clears lemmas. Returns
+  // the number of lemmas sent to the output channel.
   int flushLemmas(std::vector<Node>& lemmas);
 
   // Returns the NodeMultiset for an existing monomial.
