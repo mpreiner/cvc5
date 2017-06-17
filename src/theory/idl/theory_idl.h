@@ -1,27 +1,12 @@
-/*********************                                                        */
-/*! \file theory_idl.h
- ** \verbatim
- ** Top contributors (to current version):
- **   Dejan Jovanovic, Morgan Deters, Tim King
- ** This file is part of the CVC4 project.
- ** Copyright (c) 2009-2016 by the authors listed in the file AUTHORS
- ** in the top-level source directory) and their institutional affiliations.
- ** All rights reserved.  See the file COPYING in the top-level source
- ** directory for licensing information.\endverbatim
- **
- ** \brief [[ Add one-line brief description here ]]
- **
- ** [[ Add lengthier description here ]]
- ** \todo document this file
- **/
-
 #pragma once
 
 #include "cvc4_private.h"
 
 #include "theory/theory.h"
-#include "theory/idl/idl_model.h"
-#include "theory/idl/idl_assertion_db.h"
+
+#include "idl_assertion.h"
+
+#include "context/cdvector.h"
 
 namespace CVC4 {
 namespace theory {
@@ -32,14 +17,46 @@ namespace idl {
  */
 class TheoryIdl : public Theory {
 
-  /** The current model */
-  IDLModel d_model;
-
-  /** The asserted constraints, organized by variable */
-  IDLAssertionDB d_assertionsDB;
-
-  /** Process a new assertion, returns false if in conflict */
+  /** Process a new assertion */
   bool processAssertion(const IDLAssertion& assertion);
+
+  typedef std::pair<TNode, TNode> TNodePair;
+
+  typedef context::CDHashMap<TNode, int, TNodeHashFunction> TNodeToIntCDMap;
+  typedef context::CDHashMap<TNodePair, int, TNodePairHashFunction> TNodePairToIntCDMap;
+  typedef context::CDHashMap<TNodePair, Integer, TNodePairHashFunction> TNodePairToIntegerCDMap;
+  typedef context::CDHashMap<TNodePair, TNode, TNodePairHashFunction> TNodePairToTNodeCDMap;
+  typedef context::CDHashMap<TNodePair, std::vector<TNode>, TNodePairHashFunction> TNodePairToTNodeVectorCDMap;
+  typedef context::CDHashMap<TNode, std::vector<TNode>, TNodeHashFunction> TNodeToTNodeVectorCDMap;
+  typedef context::CDHashMap<TNode, std::pair<unsigned, unsigned>, TNodeHashFunction> TNodeToUnsignedPairCDMap;
+
+  typedef __gnu_cxx::hash_map<TNodePair, Integer, TNodePairHashFunction> HashGraphType;
+  typedef __gnu_cxx::hash_map<TNodePair, TNode, TNodePairHashFunction> HashGraphEdgesType;
+  typedef __gnu_cxx::hash_map<TNodePair, int, TNodePairHashFunction> HashGraphEdgeIdxType;
+
+  TNodePairToTNodeCDMap d_pathEdges;
+  TNodePairToIntegerCDMap d_distances;
+  TNodePairToIntCDMap d_distSetLevels;
+
+  TNodePairToTNodeVectorCDMap d_propagationEdges;
+  TNodeToIntCDMap d_propagatedLevels;
+  TNodeToTNodeVectorCDMap d_explanations;
+
+  context::CDVector<TNode> d_varList;
+
+  context::CDList<TNode> d_assertions;
+  TNodeToUnsignedPairCDMap d_propagationIndices;
+
+  bool d_levelJumped = false;
+  int d_currentLevel = 0;
+  int d_lastLevelJumpIdx;
+
+
+  bool getPath(TNodePairToTNodeCDMap& pathedges, std::vector<TNode>& edges, TNode s, TNode t);
+
+  bool getPath(HashGraphEdgesType& nextArray, std::vector<TNode>& edges, TNode s, TNode t);
+
+  size_t numprops = 0;
 
 public:
 
@@ -47,11 +64,24 @@ public:
   TheoryIdl(context::Context* c, context::UserContext* u, OutputChannel& out,
             Valuation valuation, const LogicInfo& logicInfo);
 
+  /** Register a term that is in the formula */
+  void preRegisterTerm(TNode);
+
+  /** Set up the solving data structures */
+  void presolve();
+
+  /** Clean up the solving data structures */
+  void postsolve();
+  
   /** Pre-processing of input atoms */
   Node ppRewrite(TNode atom);
 
   /** Check the assertions for satisfiability */
   void check(Effort effort);
+
+  void propagate(Effort level);
+
+  Node explain(TNode n);
 
   /** Identity string */
   std::string identify() const { return "THEORY_IDL"; }

@@ -517,15 +517,6 @@ protected:
   /////
 
   /**
-   * Get the Context with which this ContextObj was created.  This is
-   * part of the protected interface, intended for derived classes to
-   * use if necessary.
-   */
-  Context* getContext() const throw() {
-    return d_pScope->getContext();
-  }
-
-  /**
    * Get the ContextMemoryManager with which this ContextObj was
    * created.  This is part of the protected interface, intended for
    * derived classes to use if necessary.  If a ContextObj-derived
@@ -536,15 +527,6 @@ protected:
    */
   ContextMemoryManager* getCMM() const throw() {
     return d_pScope->getCMM();
-  }
-
-  /**
-   * Get the level associated to this ContextObj.  Useful if a
-   * ContextObj-derived class needs to compare the level of its last
-   * update with another ContextObj.
-   */
-  int getLevel() const throw() {
-    return d_pScope->getLevel();
   }
 
   /**
@@ -560,6 +542,32 @@ protected:
   }
 
 public:
+
+  /**
+   * Get the Context with which this ContextObj was created.  This is
+   * part of the protected interface, intended for derived classes to
+   * use if necessary.
+   */
+  Context* getContext() const throw() {
+    return d_pScope->getContext();
+  }
+
+  /**
+   * Get the level associated to this ContextObj.  Useful if a
+   * ContextObj-derived class needs to compare the level of its last
+   * update with another ContextObj.
+   */
+  int getLevel() const throw() {
+    return d_pScope->getLevel();
+  }
+
+  ContextObj* getAtLevel(int level) {
+    ContextObj* result = this;
+    while ((result->getLevel()) >= level) {
+      result = result->d_pContextObjRestore;
+    }
+    return result;
+  }
 
   /**
    * Disable delete: objects allocated with new(ContextMemorymanager) should

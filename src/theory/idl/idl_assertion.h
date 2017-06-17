@@ -42,8 +42,14 @@ class IDLAssertion {
   /** Original assertion we got this one from */
   TNode d_original;
 
+  bool d_ok = false;
+
   /** Parses the given node into an assertion, and return true if OK. */
   bool parse(TNode node, int c = 1, bool negated = false);
+
+  inline bool isIdlConstraintKind(Kind k) {
+    return (k == kind::LEQ || k == kind::GT || k == kind::LT || k == kind::GEQ);
+  }
 
 public:
 
@@ -54,10 +60,10 @@ public:
   /** Copy constructor */
   IDLAssertion(const IDLAssertion& other);
 
-  TNode getX() const { return d_x; }
-  TNode getY() const { return d_y; }
-  Kind getOp() const { return d_op;}
-  Integer getC() const { return d_c; }
+  inline TNode getX() const { return d_x; }
+  inline TNode getY() const { return d_y; }
+  inline Kind getOp() const { return d_op;}
+  inline Integer getC() const { return d_c; }
 
   /**
    * Propagate the constraint using the model. For example, if the constraint
@@ -74,11 +80,16 @@ public:
 
   /** Is this constraint proper */
   bool ok() const {
-    return !d_x.isNull() || !d_y.isNull();
+    return d_ok;
+    // return !d_x.isNull() || !d_y.isNull();
   }
 
   /** Output to the stream */
   void toStream(std::ostream& out) const;
+
+  inline TNode getTNode() const {
+    return d_original;
+  }
 };
 
 inline std::ostream& operator << (std::ostream& out, const IDLAssertion& assertion) {

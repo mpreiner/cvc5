@@ -27,9 +27,38 @@ IDLAssertion::IDLAssertion()
 
 IDLAssertion::IDLAssertion(TNode node) {
   bool ok = parse(node, 1, false);
+
+  // if (node[0].getKind() == kind::NOT) {
+  //   ok = (node.getNumChildren() == 1) && (node[0].getNumChildren == 2)
+  //     && (node[0][0].getKind() == kind::MINUS) && (node[0][1].getKind() == kind::)
+  // } else if (node[0].getKind() == kind::MINUS) {
+  //   ok = (node.getNumChildren() == 2);
+  // } else {
+  //   ok = false;
+  // }
+  // if (node.getNumChildren() != 2) {
+  //   d_ok = false;
+  //   return;
+  // }
+  // d_op = node.getKind();
+  // if(node[0].getKind() != kind::MINUS && node[0].getKind() != kind::NOT) {
+  //   d_ok = false;
+  //   return;
+  // }
+  // Rational rat = node[1].getConst<Rational>();
+  // Assert(rat.getDenominator() == 1);
+  // d_c = rat.getNumerator();
+  // d_x = node[0][0];
+  // d_y = node[0][1];
+
+  if (!(node.getKind() == kind::NOT && isIdlConstraintKind(node[0].getKind())) && !isIdlConstraintKind(node.getKind())) {
+    ok = false;
+  }
+
   if (!ok) {
-    d_x = d_y = TNode::null();
+    d_ok = false;
   } else {
+    d_ok = true;
     if (d_op == kind::GT) {
       // Turn GT into LT x - y > c is the same as y - x < -c
       std::swap(d_x, d_y);
@@ -57,6 +86,7 @@ IDLAssertion::IDLAssertion(const IDLAssertion& other)
 , d_op(other.d_op)
 , d_c(other.d_c)
 , d_original(other.d_original)
+, d_ok(other.d_ok)
 {}
 
 bool IDLAssertion::propagate(IDLModel& model) const {
