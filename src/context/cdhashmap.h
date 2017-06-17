@@ -387,6 +387,10 @@ public:
     return d_map.count(k);
   }
 
+  bool contains(const Key& k) const {
+    return d_map.find(k) != d_map.end();
+  }
+  
   // If a key is not present, a new object is created and inserted
   Element& operator[](const Key& k) {
     emptyTrash();
