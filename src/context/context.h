@@ -563,7 +563,7 @@ public:
 
   ContextObj* getAtLevel(int level) {
     ContextObj* result = this;
-    while ((result->getLevel()) >= level) {
+    while ((result->getLevel()) > level) {
       result = result->d_pContextObjRestore;
     }
     return result;
