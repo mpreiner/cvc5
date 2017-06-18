@@ -1025,6 +1025,8 @@ SmtEngine::SmtEngine(ExprManager* em) throw() :
                                     const_cast<const LogicInfo&>(d_logic),
                                     d_channels);
 
+  d_private->addUseTheoryListListener(d_theoryEngine);
+  
   // Add the theories
   for(TheoryId id = theory::THEORY_FIRST; id < theory::THEORY_LAST; ++id) {
     TheoryConstructor::addTheory(d_theoryEngine, id);
