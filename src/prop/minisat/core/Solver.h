@@ -271,6 +271,7 @@ public:
     //
     uint64_t solves, starts, decisions, rnd_decisions, propagations, conflicts, resources_consumed;
     uint64_t dec_vars, clauses_literals, learnts_literals, max_literals, tot_literals;
+    uint64_t num_clauses, num_learnt_clauses;
 
 protected:
 
