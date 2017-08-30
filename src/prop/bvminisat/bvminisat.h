@@ -125,6 +125,7 @@ private:
     ReferenceStat<uint64_t> d_statConflicts, d_statClausesLiterals;
     ReferenceStat<uint64_t> d_statLearntsLiterals,  d_statMaxLiterals;
     ReferenceStat<uint64_t> d_statTotLiterals;
+    ReferenceStat<uint64_t> d_statClauses, d_statLearntClauses;
     ReferenceStat<int> d_statEliminatedVars;
     IntStat d_statCallsToSolve;
     TimerStat d_statSolveTime;

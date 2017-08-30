@@ -114,6 +114,7 @@ Solver::Solver(CVC4::prop::TheoryProxy* proxy, CVC4::context::Context* context, 
     //
   , solves(0), starts(0), decisions(0), rnd_decisions(0), propagations(0), conflicts(0), resources_consumed(0)
   , dec_vars(0), clauses_literals(0), learnts_literals(0), max_literals(0), tot_literals(0)
+  , num_clauses(0), num_learnt_clauses(0)
 
   , ok                 (true)
   , cla_inc            (1)
@@ -446,8 +447,16 @@ void Solver::attachClause(CRef cr) {
     Assert(c.size() > 1);
     watches[~c[0]].push(Watcher(cr, c[1]));
     watches[~c[1]].push(Watcher(cr, c[0]));
-    if (c.removable()) learnts_literals += c.size();
-    else            clauses_literals += c.size();
+    if (c.removable())
+    {
+      learnts_literals += c.size();
+      ++num_learnt_clauses;
+    }
+    else
+    {
+      clauses_literals += c.size();
+      ++num_clauses;
+    }
 }
 
 
@@ -466,8 +475,17 @@ void Solver::detachClause(CRef cr, bool strict) {
         watches.smudge(~c[1]);
     }
 
-    if (c.removable()) learnts_literals -= c.size();
-    else            clauses_literals -= c.size(); }
+    if (c.removable())
+    {
+      learnts_literals -= c.size();
+      --num_learnt_clauses;
+    }
+    else
+    {
+      clauses_literals -= c.size();
+      --num_clauses;
+    }
+}
 
 
 void Solver::removeClause(CRef cr) {

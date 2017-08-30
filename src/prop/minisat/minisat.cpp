@@ -244,7 +244,9 @@ MinisatSatSolver::Statistics::Statistics(StatisticsRegistry* registry) :
     d_statClausesLiterals("sat::clauses_literals"),
     d_statLearntsLiterals("sat::learnts_literals"),
     d_statMaxLiterals("sat::max_literals"),
-    d_statTotLiterals("sat::tot_literals")
+    d_statTotLiterals("sat::tot_literals"),
+    d_statClauses("sat::clauses"),
+    d_statLearntClauses("sat::learnt_clauses")
 {
   d_registry->registerStat(&d_statStarts);
   d_registry->registerStat(&d_statDecisions);
@@ -255,6 +257,8 @@ MinisatSatSolver::Statistics::Statistics(StatisticsRegistry* registry) :
   d_registry->registerStat(&d_statLearntsLiterals);
   d_registry->registerStat(&d_statMaxLiterals);
   d_registry->registerStat(&d_statTotLiterals);
+  d_registry->registerStat(&d_statClauses);
+  d_registry->registerStat(&d_statLearntClauses);
 }
 
 MinisatSatSolver::Statistics::~Statistics() {
@@ -267,6 +271,8 @@ MinisatSatSolver::Statistics::~Statistics() {
   d_registry->unregisterStat(&d_statLearntsLiterals);
   d_registry->unregisterStat(&d_statMaxLiterals);
   d_registry->unregisterStat(&d_statTotLiterals);
+  d_registry->unregisterStat(&d_statClauses);
+  d_registry->unregisterStat(&d_statLearntClauses);
 }
 
 void MinisatSatSolver::Statistics::init(Minisat::SimpSolver* d_minisat){
@@ -279,6 +285,8 @@ void MinisatSatSolver::Statistics::init(Minisat::SimpSolver* d_minisat){
   d_statLearntsLiterals.setData(d_minisat->learnts_literals);
   d_statMaxLiterals.setData(d_minisat->max_literals);
   d_statTotLiterals.setData(d_minisat->tot_literals);
+  d_statClauses.setData(d_minisat->num_clauses);
+  d_statLearntClauses.setData(d_minisat->num_learnt_clauses);
 }
 
 } /* namespace CVC4::prop */

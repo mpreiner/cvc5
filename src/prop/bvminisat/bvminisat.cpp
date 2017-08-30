@@ -250,6 +250,8 @@ BVMinisatSatSolver::Statistics::Statistics(StatisticsRegistry* registry,
                             + "bvminisat::learnts_literals"),
       d_statMaxLiterals("theory::bv::" + prefix + "bvminisat::max_literals"),
       d_statTotLiterals("theory::bv::" + prefix + "bvminisat::tot_literals"),
+      d_statClauses("theory::bv::"+prefix+"bvminisat::clauses"),
+      d_statLearntClauses("theory::bv::"+prefix+"bvminisat::learnt_clauses"),
       d_statEliminatedVars("theory::bv::" + prefix
                            + "bvminisat::eliminated_vars"),
       d_statCallsToSolve("theory::bv::" + prefix
@@ -274,6 +276,8 @@ BVMinisatSatSolver::Statistics::Statistics(StatisticsRegistry* registry,
   d_registry->registerStat(&d_statEliminatedVars);
   d_registry->registerStat(&d_statCallsToSolve);
   d_registry->registerStat(&d_statSolveTime);
+  d_registry->registerStat(&d_statClauses);
+  d_registry->registerStat(&d_statLearntClauses);
 }
 
 BVMinisatSatSolver::Statistics::~Statistics() {
@@ -292,6 +296,8 @@ BVMinisatSatSolver::Statistics::~Statistics() {
   d_registry->unregisterStat(&d_statEliminatedVars);
   d_registry->unregisterStat(&d_statCallsToSolve);
   d_registry->unregisterStat(&d_statSolveTime);
+  d_registry->unregisterStat(&d_statClauses);
+  d_registry->unregisterStat(&d_statLearntClauses);
 }
 
 void BVMinisatSatSolver::Statistics::init(BVMinisat::SimpSolver* minisat){
@@ -309,6 +315,8 @@ void BVMinisatSatSolver::Statistics::init(BVMinisat::SimpSolver* minisat){
   d_statMaxLiterals.setData(minisat->max_literals);
   d_statTotLiterals.setData(minisat->tot_literals);
   d_statEliminatedVars.setData(minisat->eliminated_vars);
+  d_statClauses.setData(minisat->num_clauses);
+  d_statLearntClauses.setData(minisat->num_learnt_clauses);
 }
 
 } /* namespace CVC4::prop */
