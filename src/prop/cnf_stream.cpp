@@ -64,7 +64,7 @@ TseitinCnfStream::TseitinCnfStream(SatSolver* satSolver, Registrar* registrar,
 {}
 
 void CnfStream::assertClause(TNode node, SatClause& c) {
-  Debug("cnf") << "Inserting into stream " << c << " node = " << node << endl;
+  Debug("cnf") << d_name << "::Inserting into stream " << c << " node = " << node << endl;
   if(Dump.isOn("clauses")) {
     if(c.size() == 1) {
       Dump("clauses") << AssertCommand(Expr(getNode(c[0]).toExpr()));
@@ -124,7 +124,7 @@ void TseitinCnfStream::ensureLiteral(TNode n, bool noPreregistration) {
   // These are not removable and have no proof ID
   d_removable = false;
 
-  Debug("cnf") << "ensureLiteral(" << n << ")" << endl;
+  Debug("cnf") << d_name << "::ensureLiteral(" << n << ")" << endl;
   if(hasLiteral(n)) {
     SatLiteral lit = getLiteral(n);
     if(!d_literalToNodeMap.contains(lit)){
@@ -142,11 +142,9 @@ void TseitinCnfStream::ensureLiteral(TNode n, bool noPreregistration) {
                        n.toString().c_str(),
                        n.getType().toString().c_str());
 
-  bool negated CVC4_UNUSED = false;
   SatLiteral lit;
 
   if(n.getKind() == kind::NOT) {
-    negated = true;
     n = n[0];
   }
 
@@ -209,14 +207,14 @@ SatLiteral CnfStream::newLiteral(TNode node, bool isTheoryAtom, bool preRegister
   }
 
   // Here, you can have it
-  Debug("cnf") << "newLiteral(" << node << ") => " << lit << endl;
+  Debug("cnf") << d_name << "::newLiteral(" << node << ") => " << lit << endl;
 
   return lit;
 }
 
 TNode CnfStream::getNode(const SatLiteral& literal) {
-  Debug("cnf") << "getNode(" << literal << ")" << endl;
-  Debug("cnf") << "getNode(" << literal << ") => " << d_literalToNodeMap[literal] << endl;
+  Debug("cnf") << d_name << "::getNode(" << literal << ")" << endl;
+  Debug("cnf") << d_name << "::getNode(" << literal << ") => " << d_literalToNodeMap[literal] << endl;
   return d_literalToNodeMap[literal];
 }
 
@@ -233,7 +231,7 @@ void CnfStream::setProof(CnfProof* proof) {
 }
 
 SatLiteral CnfStream::convertAtom(TNode node, bool noPreregistration) {
-  Debug("cnf") << "convertAtom(" << node << ")" << endl;
+  Debug("cnf") << d_name << "::convertAtom(" << node << ")" << endl;
 
   Assert(!hasLiteral(node), "atom already mapped!");
 
@@ -264,7 +262,7 @@ SatLiteral CnfStream::getLiteral(TNode node) {
          node.toString().c_str());
 
   SatLiteral literal = d_nodeToLiteralMap[node];
-  Debug("cnf") << "CnfStream::getLiteral(" << node << ") => " << literal << std::endl;
+  Debug("cnf") << d_name << "::CnfStream::getLiteral(" << node << ") => " << literal << std::endl;
   return literal;
 }
 
@@ -392,7 +390,7 @@ SatLiteral TseitinCnfStream::handleIff(TNode iffNode) {
   Assert(iffNode.getKind() == EQUAL, "Expecting an EQUAL expression!");
   Assert(iffNode.getNumChildren() == 2, "Expecting exactly 2 children!");
 
-  Debug("cnf") << "handleIff(" << iffNode << ")" << endl;
+  Debug("cnf") << d_name << "::handleIff(" << iffNode << ")" << endl;
 
   // Convert the children to CNF
   SatLiteral a = toCNF(iffNode[0]);
@@ -434,7 +432,7 @@ SatLiteral TseitinCnfStream::handleIte(TNode iteNode) {
   Assert(iteNode.getNumChildren() == 3);
   Assert(!d_removable, "Removable clauses can not contain Boolean structure");
 
-  Debug("cnf") << "handleIte(" << iteNode[0] << " " << iteNode[1] << " " << iteNode[2] << ")" << endl;
+  Debug("cnf") << d_name << "::handleIte(" << iteNode[0] << " " << iteNode[1] << " " << iteNode[2] << ")" << endl;
 
   SatLiteral condLit = toCNF(iteNode[0]);
   SatLiteral thenLit = toCNF(iteNode[1]);
@@ -467,14 +465,14 @@ SatLiteral TseitinCnfStream::handleIte(TNode iteNode) {
 
 
 SatLiteral TseitinCnfStream::toCNF(TNode node, bool negated) {
-  Debug("cnf") << "toCNF(" << node << ", negated = " << (negated ? "true" : "false") << ")" << endl;
+  Debug("cnf") << d_name << "::toCNF(" << node << ", negated = " << (negated ? "true" : "false") << ")" << endl;
 
   SatLiteral nodeLit;
   Node negatedNode = node.notNode();
 
   // If the non-negated node has already been translated, get the translation
   if(hasLiteral(node)) {
-    Debug("cnf") << "toCNF(): already translated" << endl;
+    Debug("cnf") << d_name << "::toCNF(): already translated" << endl;
     nodeLit = getLiteral(node);
   } else {
     // Handle each Boolean operator case
@@ -675,7 +673,7 @@ void TseitinCnfStream::convertAndAssert(TNode node,
                                         bool negated,
                                         ProofRule proof_id,
                                         TNode from) {
-  Debug("cnf") << "convertAndAssert(" << node
+  Debug("cnf") << d_name << "::convertAndAssert(" << node
                << ", removable = " << (removable ? "true" : "false")
                << ", negated = " << (negated ? "true" : "false") << ")" << endl;
   d_removable = removable;
@@ -702,7 +700,7 @@ void TseitinCnfStream::convertAndAssert(TNode node,
 }
 
 void TseitinCnfStream::convertAndAssert(TNode node, bool negated) {
-  Debug("cnf") << "convertAndAssert(" << node
+  Debug("cnf") << d_name << "::convertAndAssert(" << node
                << ", negated = " << (negated ? "true" : "false") << ")" << endl;
 
   if (d_convertAndAssertCounter % ResourceManager::getFrequencyCount() == 0) {
