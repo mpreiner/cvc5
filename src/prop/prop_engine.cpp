@@ -100,7 +100,8 @@ PropEngine::PropEngine(TheoryEngine* te, DecisionEngine *de, Context* satContext
      // fullLitToNode Map =
      options::threads() > 1 ||
      options::decisionMode() == decision::DECISION_STRATEGY_RELEVANCY ||
-     ( CVC4_USE_REPLAY && replayLog != NULL ));
+     ( CVC4_USE_REPLAY && replayLog != NULL ),
+     "PropEngine");
 
   d_theoryProxy = new TheoryProxy(
       this, d_theoryEngine, d_decisionEngine, d_context, d_cnfStream, replayLog,
