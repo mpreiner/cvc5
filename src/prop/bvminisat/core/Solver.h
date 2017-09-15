@@ -83,13 +83,15 @@ private:
     Notify* d_notify;
 
     /** Cvc4 context */
-    CVC4::context::Context* c;
+    CVC4::context::Context* context;
 
     /** True constant */
     Var varTrue;
 
     /** False constant */
     Var varFalse;
+
+    context::CDO<unsigned> num_vars;
 
 public:
 
@@ -99,6 +101,8 @@ public:
     virtual ~Solver();
 
     void setNotify(Notify* toNotify);
+
+    void pop ();
 
     // Problem specification:
     //
@@ -223,8 +227,23 @@ protected:
 
     // Helper structures:
     //
-    struct VarData { CRef reason; int level; };
-    static inline VarData mkVarData(CRef cr, int l){ VarData d = {cr, l}; return d; }
+    struct VarData {
+      // Reason for the literal being in the trail
+      CRef reason;
+      // Sat level when the literal was added to the trail
+      int level;
+      // User level when the literal was added to the trail
+      int user_level;
+      // User level at which this literal was introduced
+      int intro_level;
+
+      VarData (CRef reason, int level, int user_level, int intro_level)
+        : reason(reason),
+          level(level),
+          user_level(user_level),
+          intro_level(intro_level)
+      {}
+    };
 
     struct Watcher {
         CRef cref;
@@ -249,7 +268,7 @@ protected:
 
     // Solver state:
     //
-    bool                ok;               // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
+    context::CDO<bool>  ok;               // If FALSE, the constraints are already unsatisfiable. No part of the solver state may be used!
     vec<CRef>           clauses;          // List of problem clauses.
     vec<CRef>           learnts;          // List of learnt clauses.
     double              cla_inc;          // Amount to bump next clause with.
@@ -310,7 +329,7 @@ protected:
       UIP_LAST
     };
 
-    void     analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, UIP uip = UIP_FIRST);    // (bt = backtrack)
+    int      analyze          (CRef confl, vec<Lit>& out_learnt, int& out_btlevel, UIP uip = UIP_FIRST);    // (bt = backtrack)
     void     analyzeFinal     (Lit p, vec<Lit>& out_conflict);                         // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
     void     analyzeFinal2(Lit p, CRef confl_clause, vec<Lit>& out_conflict);
     bool     litRedundant     (Lit p, uint32_t abstract_levels);                       // (helper method for 'analyze()')
@@ -318,7 +337,9 @@ protected:
     lbool    solve_           ();                                                      // Main solve method (assumptions given in 'assumptions').
     void     reduceDB         ();                                                      // Reduce the set of learnt clauses.
     void     removeSatisfied  (vec<CRef>& cs);                                         // Shrink 'cs' to contain only non-satisfied clauses.
+    void     removeAboveLevel (vec<CRef>& cs, int level);                              // Shrink 'cs' to contain only clauses below given level.
     void     rebuildOrderHeap ();
+    void     resizeVars       (int newSize);                                           // Keep only newSize variables.
 
     // Maintaining Variable/Clause activity:
     //
@@ -344,6 +365,8 @@ protected:
     uint32_t abstractLevel    (Var x) const; // Used to represent an abstraction of sets of decision levels.
     CRef     reason           (Var x) const;
     int      level            (Var x) const;
+    int      user_level       (Var x) const; // User level at which this variable was asserted
+    int      intro_level      (Var x) const; // User level at which this variable was created
     double   progressEstimate ()      const; // DELETE THIS ?? IT'S NOT VERY USEFUL ...
     bool     withinBudget     (uint64_t ammount)      const;
 
@@ -397,6 +420,8 @@ protected:
 
 inline CRef Solver::reason(Var x) const { assert(x < vardata.size()); return vardata[x].reason; }
 inline int  Solver::level (Var x) const { assert(x < vardata.size()); return vardata[x].level; }
+inline int  Solver::user_level(Var x) const { assert(x < vardata.size()); return vardata[x].user_level; }
+inline int  Solver::intro_level(Var x) const { assert(x < vardata.size()); return vardata[x].intro_level; }
 
 inline void Solver::insertVarOrder(Var x) {
     if (!order_heap.inHeap(x) && decision[x]) order_heap.insert(x); }
