@@ -35,20 +35,20 @@ EagerBitblaster::EagerBitblaster(TheoryBV* theory_bv)
     : TBitblaster<Node>(),
       d_satSolver(NULL),
       d_bitblastingRegistrar(NULL),
-      d_nullContext(NULL),
+      d_context(NULL),
       d_cnfStream(NULL),
       d_bv(theory_bv),
       d_bbAtoms(),
       d_variables(),
       d_notify(NULL) {
   d_bitblastingRegistrar = new BitblastingRegistrar(this);
-  d_nullContext = new context::Context();
+  d_context = new context::Context();
 
   switch (options::bvSatSolver()) {
     case SAT_SOLVER_MINISAT: {
       prop::BVSatSolverInterface* minisat =
           prop::SatSolverFactory::createMinisat(
-              d_nullContext, smtStatisticsRegistry(), "EagerBitblaster");
+              d_context, smtStatisticsRegistry(), "EagerBitblaster");
       d_notify = new MinisatEmptyNotify();
       minisat->setNotify(d_notify);
       d_satSolver = minisat;
@@ -63,7 +63,7 @@ EagerBitblaster::EagerBitblaster(TheoryBV* theory_bv)
   }
 
   d_cnfStream = new prop::TseitinCnfStream(d_satSolver, d_bitblastingRegistrar,
-                                           d_nullContext, options::proof(),
+                                           d_context, options::proof(),
                                            "EagerBitblaster");
 
   d_bvp = NULL;
@@ -73,7 +73,7 @@ EagerBitblaster::~EagerBitblaster() {
   delete d_cnfStream;
   delete d_satSolver;
   delete d_notify;
-  delete d_nullContext;
+  delete d_context;
   delete d_bitblastingRegistrar;
 }
 
@@ -243,7 +243,7 @@ void EagerBitblaster::collectModelInfo(TheoryModel* m, bool fullModel) {
 void EagerBitblaster::setProofLog(BitVectorProof* bvp) {
   d_bvp = bvp;
   d_satSolver->setProofLog(bvp);
-  bvp->initCnfProof(d_cnfStream, d_nullContext);
+  bvp->initCnfProof(d_cnfStream, d_context);
 }
 
 bool EagerBitblaster::isSharedTerm(TNode node) {

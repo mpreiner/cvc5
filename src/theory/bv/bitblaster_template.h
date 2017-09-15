@@ -147,7 +147,7 @@ class TLazyBitblaster :  public TBitblaster<Node> {
   context::Context* d_ctx;
 
   prop::NullRegistrar* d_nullRegistrar;
-  context::Context* d_nullContext;
+  context::Context* d_context;
   // sat solver used for bitblasting and associated CnfStream
   prop::BVSatSolverInterface*         d_satSolver;
   prop::BVSatSolverInterface::Notify* d_satSolverNotify;
@@ -263,7 +263,7 @@ class EagerBitblaster : public TBitblaster<Node> {
   // sat solver used for bitblasting and associated CnfStream
   prop::SatSolver*                   d_satSolver;
   BitblastingRegistrar*              d_bitblastingRegistrar;
-  context::Context*                  d_nullContext;
+  context::Context*                  d_context;
   prop::CnfStream*                   d_cnfStream;
 
   theory::bv::TheoryBV* d_bv;
@@ -310,7 +310,7 @@ class AigBitblaster : public TBitblaster<Abc_Obj_t*> {
   typedef std::unordered_map<Node, Abc_Obj_t*, NodeHashFunction > NodeAigMap;
   
   static Abc_Ntk_t* abcAigNetwork;
-  context::Context* d_nullContext;
+  context::Context* d_context;
   prop::SatSolver* d_satSolver;
   TNodeAigMap d_aigCache;
   NodeAigMap d_bbAtoms;

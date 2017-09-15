@@ -52,10 +52,10 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c, bv::TheoryBV* bv,
   d_satSolver = prop::SatSolverFactory::createMinisat(
       c, smtStatisticsRegistry(), name);
   d_nullRegistrar = new prop::NullRegistrar();
-  d_nullContext = new context::Context();
+  d_context = c;
   d_cnfStream = new prop::TseitinCnfStream(d_satSolver,
                                            d_nullRegistrar,
-                                           d_nullContext,
+                                           d_context,
                                            options::proof(),
                                            "LazyBitblaster");
 
@@ -74,7 +74,6 @@ void TLazyBitblaster::setAbstraction(AbstractionModule* abs) {
 TLazyBitblaster::~TLazyBitblaster() throw() {
   delete d_cnfStream;
   delete d_nullRegistrar;
-  delete d_nullContext;
   delete d_satSolver;
   delete d_satSolverNotify;
   d_assertedAtoms->deleteSelf();
@@ -512,7 +511,7 @@ void TLazyBitblaster::collectModelInfo(TheoryModel* m, bool fullModel) {
 void TLazyBitblaster::setProofLog( BitVectorProof * bvp ){
   d_bvp = bvp;
   d_satSolver->setProofLog( bvp );
-  bvp->initCnfProof(d_cnfStream, d_nullContext);
+  bvp->initCnfProof(d_cnfStream, d_context);
 }
 
 void TLazyBitblaster::clearSolver() {
@@ -533,7 +532,7 @@ void TLazyBitblaster::clearSolver() {
   d_satSolver = prop::SatSolverFactory::createMinisat(
       d_ctx, smtStatisticsRegistry());
   d_cnfStream = new prop::TseitinCnfStream(d_satSolver, d_nullRegistrar,
-                                           d_nullContext);
+                                           d_context);
 
   d_satSolverNotify = d_emptyNotify ?
     (prop::BVSatSolverInterface::Notify*) new MinisatEmptyNotify() :
