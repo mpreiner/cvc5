@@ -64,7 +64,8 @@ SimpSolver::SimpSolver(CVC4::context::Context* c) :
   , asymm_lits         (0)
   , eliminated_vars    (0)
   , elimorder          (1)
-  , use_simplification (!PROOF_ON())
+    // TODO: workaround, disable simplification for the incremental case (same as for the dpll(t) sat engine)
+  , use_simplification (!PROOF_ON() && false)
   , occurs             (ClauseDeleted(ca))
   , elim_heap          (ElimLt(n_occ))
   , bwdsub_assigns     (0)
@@ -73,7 +74,7 @@ SimpSolver::SimpSolver(CVC4::context::Context* c) :
 
     vec<Lit> dummy(1,lit_Undef);
     ca.extra_clause_field = true; // NOTE: must happen before allocating the dummy clause below.
-    bwdsub_tmpunit        = ca.alloc(dummy);
+    bwdsub_tmpunit        = ca.alloc(0, dummy);
     remove_satisfied      = false;
 
     // add the initialization for all the internal variables

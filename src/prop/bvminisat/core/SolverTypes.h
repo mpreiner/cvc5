@@ -149,19 +149,21 @@ class Clause {
         unsigned learnt    : 1;
         unsigned has_extra : 1;
         unsigned reloced   : 1;
-        unsigned size      : 27; }                            header;
+        unsigned size      : 27;
+        int      level     : 32; } header;
     union { Lit lit; float act; uint32_t abs; CRef rel; } data[0];
 
     friend class ClauseAllocator;
 
     // NOTE: This constructor cannot be used directly (doesn't allocate enough memory).
     template<class V>
-    Clause(const V& ps, bool use_extra, bool learnt) {
+    Clause(int level, const V& ps, bool use_extra, bool learnt) {
         header.mark      = 0;
         header.learnt    = learnt;
         header.has_extra = use_extra;
         header.reloced   = 0;
         header.size      = ps.size();
+        header.level     = level;
 
         for (int i = 0; i < ps.size(); i++) 
             data[i].lit = ps[i];
@@ -182,6 +184,7 @@ public:
         data[header.size].abs = abstraction;  }
 
 
+    int          level       ()      const   { return header.level; }
     int          size        ()      const   { return header.size; }
     void         shrink      (int i)         { assert(i <= size()); if (header.has_extra) data[header.size-i] = data[header.size]; header.size -= i; }
     void         pop         ()              { shrink(1); }
@@ -231,14 +234,14 @@ class ClauseAllocator : public RegionAllocator<uint32_t>
         RegionAllocator<uint32_t>::moveTo(to); }
 
     template<class Lits>
-    CRef alloc(const Lits& ps, bool learnt = false)
+    CRef alloc(int level, const Lits& ps, bool learnt = false)
     {
         assert(sizeof(Lit)      == sizeof(uint32_t));
         assert(sizeof(float)    == sizeof(uint32_t));
         bool use_extra = learnt | extra_clause_field;
 
         CRef cid = RegionAllocator<uint32_t>::alloc(clauseWord32Size(ps.size(), use_extra));
-        new (lea(cid)) Clause(ps, use_extra, learnt);
+        new (lea(cid)) Clause(level, ps, use_extra, learnt);
 
         return cid;
     }
@@ -277,6 +280,7 @@ class OccLists
     OccLists(const Deleted& d) : deleted(d) {}
     
     void  init      (const Idx& idx){ occs.growTo(toInt(idx)+1); dirty.growTo(toInt(idx)+1, 0); }
+    void  resizeTo  (const Idx& idx);
     // Vec&  operator[](const Idx& idx){ return occs[toInt(idx)]; }
     Vec&  operator[](const Idx& idx){ return occs[toInt(idx)]; }
     Vec&  lookup    (const Idx& idx){ if (dirty[toInt(idx)]) clean(idx); return occs[toInt(idx)]; }
@@ -308,6 +312,19 @@ void OccLists<Idx,Vec,Deleted>::cleanAll()
     dirties.clear();
 }
 
+template<class Idx, class Vec, class Deleted>
+void OccLists<Idx,Vec,Deleted>::resizeTo(const Idx& idx)
+{
+    int shrinkSize = occs.size() - (toInt(idx) + 1);
+    occs.shrink(shrinkSize);
+    dirty.shrink(shrinkSize);
+    // Remove out-of-bound indices from dirties
+    int  i, j;
+    for (i = j = 0; i < dirties.size(); i++)
+        if (toInt(dirties[i]) < occs.size())
+            dirties[j++] = dirties[i];
+    dirties.shrink(i - j);
+}
 
 template<class Idx, class Vec, class Deleted>
 void OccLists<Idx,Vec,Deleted>::clean(const Idx& idx)
