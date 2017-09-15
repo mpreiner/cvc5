@@ -100,6 +100,7 @@ void BVMinisatSatSolver::contextNotifyPop() {
     popAssumption();
     d_assertionsCount --;
   }
+  d_minisat->pop();
 }
 
 void BVMinisatSatSolver::popAssumption() {
