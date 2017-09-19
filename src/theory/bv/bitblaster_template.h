@@ -144,7 +144,7 @@ class TLazyBitblaster :  public TBitblaster<Node> {
   };
 
   TheoryBV *d_bv;
-  context::Context* d_ctx;
+  context::Context* d_ctx; // FIXME: redudant since we now have d_context instead of nullContext?
 
   prop::NullRegistrar* d_nullRegistrar;
   context::Context* d_context;
@@ -158,7 +158,7 @@ class TLazyBitblaster :  public TBitblaster<Node> {
   ExplanationMap* d_explanations; /**< context dependent list of explanations for the propagated literals.
                                     Only used when bvEagerPropagate option enabled. */
   TNodeSet d_variables;
-  TNodeSet d_bbAtoms;
+  context::CDHashSet<Node, NodeHashFunction> d_bbAtoms;
   AbstractionModule* d_abstraction;
   bool d_emptyNotify;
 

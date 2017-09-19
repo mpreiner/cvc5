@@ -39,10 +39,11 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c, bv::TheoryBV* bv,
   : TBitblaster<Node>()
   , d_bv(bv)
   , d_ctx(c)
+  , d_context(c)
   , d_assertedAtoms(new(true) context::CDList<prop::SatLiteral>(c))
   , d_explanations(new(true) ExplanationMap(c))
   , d_variables()
-  , d_bbAtoms()
+  , d_bbAtoms(c)
   , d_abstraction(NULL)
   , d_emptyNotify(emptyNotify)
   , d_fullModelAssertionLevel(c, 0)
@@ -52,7 +53,6 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c, bv::TheoryBV* bv,
   d_satSolver = prop::SatSolverFactory::createMinisat(
       c, smtStatisticsRegistry(), name);
   d_nullRegistrar = new prop::NullRegistrar();
-  d_context = c;
   d_cnfStream = new prop::TseitinCnfStream(d_satSolver,
                                            d_nullRegistrar,
                                            d_context,
@@ -523,7 +523,7 @@ void TLazyBitblaster::clearSolver() {
   d_assertedAtoms = new(true) context::CDList<prop::SatLiteral>(d_ctx);
   d_explanations->deleteSelf();
   d_explanations = new(true) ExplanationMap(d_ctx);
-  d_bbAtoms.clear();
+  d_bbAtoms.deleteSelf();
   d_variables.clear();
   d_termCache.clear();
 
