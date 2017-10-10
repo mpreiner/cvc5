@@ -203,13 +203,10 @@ void Solver::pop ()
   // Clean up clause databases: remove all clauses with level > cur_level
   removeAboveLevel(clauses, cur_level);
   removeAboveLevel(learnts, cur_level);
-  // Watchers are marked as dirty, remove them properly.
-  watches.cleanAll();
 
   // Resize all variable dependent data structures.
   resizeVars(num_vars);
-  // TODO(ma): remove next >= nVars() in pickBranchLit() and enable this
-  // rebuildOrderHeap();
+  rebuildOrderHeap();
   garbageCollect();
 }
 
@@ -485,10 +482,8 @@ Lit Solver::pickBranchLit()
         if (value(next) == l_Undef && decision[next])
             rnd_decisions++; }
 
-    // TODO(mathias): check if this is a problem if deleted variables are on
-    // the order_heap
     // Activity based decision:
-    while (next >= nVars() || next == var_Undef || value(next) != l_Undef || !decision[next]) {
+    while (next == var_Undef || value(next) != l_Undef || !decision[next]) {
         if (order_heap.empty()){
             next = var_Undef;
             break;
