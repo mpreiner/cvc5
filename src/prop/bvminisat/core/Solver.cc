@@ -176,7 +176,6 @@ void Solver::pop ()
 //            << "  learnts: " << learnts.size()
 //            << "  vars:  " << nVars()
 //            << std::endl;
-  --cur_level;
 
   cancelUntil(0);
 
@@ -483,13 +482,16 @@ Lit Solver::pickBranchLit()
         if (value(next) == l_Undef && decision[next])
             rnd_decisions++; }
 
+    // TODO(mathias): check if this is a problem if deleted variables are on
+    // the order_heap
     // Activity based decision:
-    while (next == var_Undef || value(next) != l_Undef || !decision[next])
+    while (next >= nVars() || next == var_Undef || value(next) != l_Undef || !decision[next]) {
         if (order_heap.empty()){
             next = var_Undef;
             break;
         }else
             next = order_heap.removeMin();
+    }
 
     return next == var_Undef ? lit_Undef : mkLit(next, rnd_pol ? drand(random_seed) < 0.5 : polarity[next]);
 }
