@@ -208,6 +208,9 @@ void Solver::pop ()
 
   // Resize all variable dependent data structures.
   resizeVars(num_vars);
+  // TODO(ma): remove next >= nVars() in pickBranchLit() and enable this
+  // rebuildOrderHeap();
+  garbageCollect();
 }
 
 
