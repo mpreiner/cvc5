@@ -126,7 +126,17 @@ matrix:
             - g++-7
       env:
         - MATRIX_EVAL='CC=gcc-7 && CXX=g++-7'
-        - TRAVIS_CVC4=yes TRAVIS_WITH_LFSC=yes TRAVIS_CVC4_CONFIG='debug --with-lfsc --disable-debug-symbols'
+        - TRAVIS_CVC4=yes TRAVIS_WITH_LFSC=yes TRAVIS_CVC4_CONFIG='debug --with-lfsc --disable-debug-symbols' TEST_GROUP=0
+    - addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - *common_deps
+            - g++-7
+      env:
+        - MATRIX_EVAL='CC=gcc-7 && CXX=g++-7'
+        - TRAVIS_CVC4=yes TRAVIS_WITH_LFSC=yes TRAVIS_CVC4_CONFIG='debug --with-lfsc --disable-debug-symbols' TEST_GROUP=1
     # Rule for running Coverity Scan.
     - os: linux
       compiler: gcc
