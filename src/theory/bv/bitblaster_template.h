@@ -158,7 +158,7 @@ class TLazyBitblaster :  public TBitblaster<Node> {
   ExplanationMap* d_explanations; /**< context dependent list of explanations for the propagated literals.
                                     Only used when bvEagerPropagate option enabled. */
   TNodeSet d_variables;
-  context::CDHashSet<Node, NodeHashFunction> d_bbAtoms;
+  context::CDHashSet<Node, NodeHashFunction> *d_bbAtoms;
   AbstractionModule* d_abstraction;
   bool d_emptyNotify;
 
