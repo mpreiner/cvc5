@@ -144,7 +144,6 @@ class TLazyBitblaster :  public TBitblaster<Node> {
   };
 
   TheoryBV *d_bv;
-  context::Context* d_ctx; // FIXME: redudant since we now have d_context instead of nullContext?
 
   prop::NullRegistrar* d_nullRegistrar;
   context::Context* d_context;

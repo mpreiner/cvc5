@@ -38,7 +38,6 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c, bv::TheoryBV* bv,
                                  const std::string name, bool emptyNotify)
   : TBitblaster<Node>()
   , d_bv(bv)
-  , d_ctx(c)
   , d_context(c)
   , d_assertedAtoms(new(true) context::CDList<prop::SatLiteral>(c))
   , d_explanations(new(true) ExplanationMap(c))
@@ -515,14 +514,14 @@ void TLazyBitblaster::setProofLog( BitVectorProof * bvp ){
 }
 
 void TLazyBitblaster::clearSolver() {
-  Assert (d_ctx->getLevel() == 0);
+  Assert(d_context->getLevel() == 0);
   delete d_satSolver;
   delete d_satSolverNotify;
   delete d_cnfStream;
   d_assertedAtoms->deleteSelf();
-  d_assertedAtoms = new(true) context::CDList<prop::SatLiteral>(d_ctx);
+  d_assertedAtoms = new (true) context::CDList<prop::SatLiteral>(d_context);
   d_explanations->deleteSelf();
-  d_explanations = new(true) ExplanationMap(d_ctx);
+  d_explanations = new (true) ExplanationMap(d_context);
   d_bbAtoms->deleteSelf();
   d_bbAtoms = new(true) context::CDHashSet<Node, NodeHashFunction>(d_context);
   d_variables.clear();
@@ -530,8 +529,8 @@ void TLazyBitblaster::clearSolver() {
 
   invalidateModelCache();
   // recreate sat solver
-  d_satSolver = prop::SatSolverFactory::createMinisat(
-      d_ctx, smtStatisticsRegistry());
+  d_satSolver =
+      prop::SatSolverFactory::createMinisat(d_context, smtStatisticsRegistry());
   d_cnfStream = new prop::TseitinCnfStream(d_satSolver, d_nullRegistrar,
                                            d_context);
 
