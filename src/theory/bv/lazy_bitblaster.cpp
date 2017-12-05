@@ -57,6 +57,8 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c, bv::TheoryBV* bv,
                                            d_context,
                                            options::proof(),
                                            "LazyBitblaster");
+  d_termCache = new (true)
+      context::CDInsertHashMap<Node, Bits, NodeHashFunction>(d_context);
 
   d_satSolverNotify = d_emptyNotify ?
     (prop::BVSatSolverInterface::Notify*) new MinisatEmptyNotify() :
@@ -154,7 +156,7 @@ void TLazyBitblaster::storeBBAtom(TNode atom, Node atom_bb) {
 
 void TLazyBitblaster::storeBBTerm(TNode node, const Bits& bits) {
   if( d_bvp ){ d_bvp->registerTermBB(node.toExpr()); }
-  d_termCache.insert(std::make_pair(node, bits));
+  d_termCache->insert_safe(node, bits);
 }
 
 
@@ -281,7 +283,7 @@ bool TLazyBitblaster::assertToSat(TNode lit, bool propagate) {
 
 bool TLazyBitblaster::solve() {
   if (Trace.isOn("bitvector")) {
-    Trace("bitvector") << "TLazyBitblaster::solve() asserted atoms ";
+    Trace("bitvector") << "TLazyBitblaster::solve() asserted atoms" << std::endl;
     context::CDList<prop::SatLiteral>::const_iterator it = d_assertedAtoms->begin();
     for (; it != d_assertedAtoms->end(); ++it) {
       Trace("bitvector") << "     " << d_cnfStream->getNode(*it) << "\n";
@@ -525,7 +527,8 @@ void TLazyBitblaster::clearSolver() {
   d_bbAtoms->deleteSelf();
   d_bbAtoms = new(true) context::CDHashSet<Node, NodeHashFunction>(d_context);
   d_variables.clear();
-  d_termCache.clear();
+  d_termCache->deleteSelf();
+  d_termCache = new(true) TermDefMap(d_context);
 
   invalidateModelCache();
   // recreate sat solver

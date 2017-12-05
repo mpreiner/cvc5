@@ -43,6 +43,8 @@ EagerBitblaster::EagerBitblaster(TheoryBV* theory_bv)
       d_notify(NULL) {
   d_bitblastingRegistrar = new BitblastingRegistrar(this);
   d_context = new context::Context();
+  d_termCache = new (true)
+      context::CDInsertHashMap<Node, Bits, NodeHashFunction>(d_context);
 
   switch (options::bvSatSolver()) {
     case SAT_SOLVER_MINISAT: {
@@ -128,7 +130,7 @@ void EagerBitblaster::storeBBTerm(TNode node, const Bits& bits) {
   if (d_bvp) {
     d_bvp->registerTermBB(node.toExpr());
   }
-  d_termCache.insert(std::make_pair(node, bits));
+  d_termCache->insert_safe(node, bits);
 }
 
 bool EagerBitblaster::hasBBAtom(TNode atom) const {
