@@ -82,7 +82,7 @@ protected:
   typedef T     (*AtomBBStrategy) (TNode, TBitblaster<T>*);
 
   // caches and mappings
-  TermDefMap *d_termCache;
+  TermDefMap* d_termCache;
   ModelCache d_modelCache;
 
   BitVectorProof * d_bvp;
@@ -156,8 +156,8 @@ class TLazyBitblaster :  public TBitblaster<Node> {
                                      currently asserted by the DPLL SAT solver. */
   ExplanationMap* d_explanations; /**< context dependent list of explanations for the propagated literals.
                                     Only used when bvEagerPropagate option enabled. */
-  TNodeSet d_variables;
-  context::CDHashSet<Node, NodeHashFunction> *d_bbAtoms;
+  context::CDHashSet<Node, NodeHashFunction>* d_variables;
+  context::CDHashSet<Node, NodeHashFunction>* d_bbAtoms;
   AbstractionModule* d_abstraction;
   bool d_emptyNotify;
 
@@ -209,9 +209,10 @@ public:
   void collectModelInfo(TheoryModel* m, bool fullModel);
   void setProofLog( BitVectorProof * bvp );
 
-  typedef TNodeSet::const_iterator vars_iterator;
-  vars_iterator beginVars() { return d_variables.begin(); }
-  vars_iterator endVars() { return d_variables.end(); }
+  using vars_iterator =
+      context::CDHashSet<Node, NodeHashFunction>::const_iterator;
+  vars_iterator beginVars() { return d_variables->begin(); }
+  vars_iterator endVars() { return d_variables->end(); }
 
   /**
    * Creates the bits corresponding to the variable (or non-bv term). 

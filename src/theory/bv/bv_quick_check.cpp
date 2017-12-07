@@ -108,10 +108,10 @@ void BVQuickCheck::pop() {
   d_ctx.pop();
 }
 
-BVQuickCheck::vars_iterator BVQuickCheck::beginVars() {
+TLazyBitblaster::vars_iterator BVQuickCheck::beginVars() {
   return d_bitblaster->beginVars(); 
 }
-BVQuickCheck::vars_iterator BVQuickCheck::endVars() {
+TLazyBitblaster::vars_iterator BVQuickCheck::endVars() {
   return d_bitblaster->endVars(); 
 }
 

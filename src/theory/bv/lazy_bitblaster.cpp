@@ -41,7 +41,7 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c, bv::TheoryBV* bv,
   , d_context(c)
   , d_assertedAtoms(new(true) context::CDList<prop::SatLiteral>(c))
   , d_explanations(new(true) ExplanationMap(c))
-  , d_variables()
+  , d_variables(new(true) context::CDHashSet<Node, NodeHashFunction>(c))
   , d_bbAtoms(new(true) context::CDHashSet<Node, NodeHashFunction>(c))
   , d_abstraction(NULL)
   , d_emptyNotify(emptyNotify)
@@ -170,7 +170,7 @@ void TLazyBitblaster::makeVariable(TNode var, Bits& bits) {
   for (unsigned i = 0; i < utils::getSize(var); ++i) {
     bits.push_back(utils::mkBitOf(var, i));
   }
-  d_variables.insert(var);
+  d_variables->insert(var);
 }
 
 uint64_t TLazyBitblaster::computeAtomWeight(TNode node, NodeSet& seen) {
@@ -491,7 +491,7 @@ void TLazyBitblaster::collectModelInfo(TheoryModel* m, bool fullModel) {
   for (std::set<Node>::const_iterator it = termSet.begin(); it != termSet.end(); ++it) {
     TNode var = *it;
     // not actually a leaf of the bit-vector theory
-    if (d_variables.find(var) == d_variables.end())
+    if (d_variables->find(var) == d_variables->end())
       continue;
 
     Assert (Theory::theoryOf(var) == theory::THEORY_BV || isSharedTerm(var));
@@ -520,13 +520,18 @@ void TLazyBitblaster::clearSolver() {
   delete d_satSolver;
   delete d_satSolverNotify;
   delete d_cnfStream;
+  // TODO: does it even make sense to delete these data structures since they
+  // are now all context-dependent and clearSolver is supposed to be called at
+  // level 0?
   d_assertedAtoms->deleteSelf();
   d_assertedAtoms = new (true) context::CDList<prop::SatLiteral>(d_context);
   d_explanations->deleteSelf();
   d_explanations = new (true) ExplanationMap(d_context);
   d_bbAtoms->deleteSelf();
   d_bbAtoms = new(true) context::CDHashSet<Node, NodeHashFunction>(d_context);
-  d_variables.clear();
+  d_variables->deleteSelf();
+  d_variables =
+      new (true) context::CDHashSet<Node, NodeHashFunction>(d_context);
   d_termCache->deleteSelf();
   d_termCache = new(true) TermDefMap(d_context);
 
