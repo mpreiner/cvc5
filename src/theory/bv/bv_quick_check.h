@@ -97,7 +97,7 @@ public:
    * @return 
    */
   uint64_t computeAtomWeight(TNode atom, NodeSet& seen);
-  void collectModelInfo(theory::TheoryModel* model, bool fullModel); 
+  bool collectModelInfo(theory::TheoryModel* model, bool fullModel);
 
   TLazyBitblaster::vars_iterator beginVars();
   TLazyBitblaster::vars_iterator endVars();

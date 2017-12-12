@@ -206,7 +206,7 @@ public:
    * @param fullModel whether to create a "full model," i.e., add
    * constants to equivalence classes that don't already have them
    */
-  void collectModelInfo(TheoryModel* m, bool fullModel);
+  bool collectModelInfo(TheoryModel* m, bool fullModel);
   void setProofLog( BitVectorProof * bvp );
 
   using vars_iterator =
@@ -292,7 +292,7 @@ public:
 
   bool assertToSat(TNode node, bool propagate = true);
   bool solve();
-  void collectModelInfo(TheoryModel* m, bool fullModel);
+  bool collectModelInfo(TheoryModel* m, bool fullModel);
   void setProofLog( BitVectorProof * bvp );
 };
 
