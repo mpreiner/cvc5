@@ -189,23 +189,38 @@ Node TheoryBV::getBVDivByZero(Kind k, unsigned width) {
   Unreachable();
 }
 
+void TheoryBV::collectFunctionSymbols(const std::vector<Node>& assertions)
+{
+  std::vector<TNode> visit;
+  TNodeSet seen;
+  TNode cur;
 
-void TheoryBV::collectFunctionSymbols(TNode term, TNodeSet& seen) {
-  if (seen.find(term) != seen.end())
-    return;
-  if (term.getKind() == kind::APPLY_UF) {
-    TNode func = term.getOperator();
-    storeFunction(func, term);
-  } else if (term.getKind() == kind::SELECT) {
-    TNode func = term[0];
-    storeFunction(func, term);
-  } else if (term.getKind() == kind::STORE) {
-    AlwaysAssert(false, "Cannot use eager bitblasting on QF_ABV formula with stores");
+  visit.insert(visit.end(), assertions.begin(), assertions.end());
+  while (!visit.empty())
+  {
+    cur = visit.back();
+    visit.pop_back();
+
+    if (seen.find(cur) != seen.end()) { continue; }
+    seen.insert(cur);
+
+    if (cur.getKind() == kind::APPLY_UF)
+    {
+      TNode func = cur.getOperator();
+      storeFunction(func, cur);
+    }
+    else if (cur.getKind() == kind::SELECT)
+    {
+      TNode func = cur[0];
+      storeFunction(func, cur);
+    }
+    else if (cur.getKind() == kind::STORE)
+    {
+      AlwaysAssert(
+          false, "Cannot use eager bitblasting on QF_ABV formula with stores");
+    }
+    visit.insert(visit.end(), cur.begin(), cur.end());
   }
-  for (unsigned i = 0; i < term.getNumChildren(); ++i) {
-    collectFunctionSymbols(term[i], seen);
-  }
-  seen.insert(term);
 }
 
 void TheoryBV::storeFunction(TNode func, TNode term) {
@@ -225,10 +240,7 @@ void TheoryBV::mkAckermanizationAssertions(std::vector<Node>& assertions) {
 
   Assert(options::bitblastMode() == theory::bv::BITBLAST_MODE_EAGER);
   AlwaysAssert(!options::incrementalSolving());
-  TNodeSet seen;
-  for (unsigned i = 0; i < assertions.size(); ++i) {
-    collectFunctionSymbols(assertions[i], seen);
-  }
+  collectFunctionSymbols(assertions);
 
   FunctionToArgs::const_iterator it = d_funcToArgs.begin();
   NodeManager* nm = NodeManager::currentNM();

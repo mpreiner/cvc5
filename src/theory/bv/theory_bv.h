@@ -136,7 +136,7 @@ private:
   Node getBVDivByZero(Kind k, unsigned width);
 
   typedef std::unordered_set<TNode, TNodeHashFunction> TNodeSet;
-  void collectFunctionSymbols(TNode term, TNodeSet& seen);
+  void collectFunctionSymbols(const std::vector<Node>& term);
   void storeFunction(TNode func, TNode term);
   typedef std::unordered_set<Node, NodeHashFunction> NodeSet;
   NodeSet d_staticLearnCache;
