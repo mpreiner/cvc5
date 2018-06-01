@@ -78,9 +78,10 @@ class TLazyBitblaster : public TBitblaster<Node>
   bool collectModelInfo(TheoryModel* m, bool fullModel);
   void setProofLog(BitVectorProof* bvp);
 
-  typedef TNodeSet::const_iterator vars_iterator;
-  vars_iterator beginVars() { return d_variables.begin(); }
-  vars_iterator endVars() { return d_variables.end(); }
+  using vars_iterator =
+      context::CDHashSet<Node, NodeHashFunction>::const_iterator;
+  vars_iterator beginVars() { return d_variables->begin(); }
+  vars_iterator endVars() { return d_variables->end(); }
 
   /**
    * Creates the bits corresponding to the variable (or non-bv term).
@@ -133,13 +134,14 @@ class TLazyBitblaster : public TBitblaster<Node>
   std::unique_ptr<prop::BVSatSolverInterface::Notify> d_satSolverNotify;
   std::unique_ptr<prop::CnfStream> d_cnfStream;
 
-  AssertionList*
-      d_assertedAtoms;            /**< context dependent list storing the atoms
-                                     currently asserted by the DPLL SAT solver. */
-  ExplanationMap* d_explanations; /**< context dependent list of explanations
-                                    for the propagated literals. Only used when
-                                    bvEagerPropagate option enabled. */
-  TNodeSet d_variables;
+  /* context dependent list storing the atoms currently asserted by the DPLL
+   * SAT solver. */
+  std::unique_ptr<AssertionList> d_assertedAtoms;
+  /* context dependent list of explanations for the propagated literals. Only
+   * used when bvEagerPropagate option enabled. */
+  std::unique_ptr<ExplanationMap> d_explanations;
+
+  std::unique_ptr<context::CDHashSet<Node, NodeHashFunction>> d_variables;
   std::unique_ptr<context::CDHashSet<Node, NodeHashFunction>> d_bbAtoms;
   AbstractionModule* d_abstraction;
   bool d_emptyNotify;

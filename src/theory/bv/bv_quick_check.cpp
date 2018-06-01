@@ -17,7 +17,6 @@
 #include "theory/bv/bv_quick_check.h"
 
 #include "smt/smt_statistics_registry.h"
-#include "theory/bv/bitblast/lazy_bitblaster.h"
 #include "theory/bv/theory_bv_utils.h"
 
 using namespace CVC4::prop;
@@ -110,10 +109,10 @@ void BVQuickCheck::pop() {
   d_ctx.pop();
 }
 
-BVQuickCheck::vars_iterator BVQuickCheck::beginVars() {
+TLazyBitblaster::vars_iterator BVQuickCheck::beginVars() {
   return d_bitblaster->beginVars(); 
 }
-BVQuickCheck::vars_iterator BVQuickCheck::endVars() {
+TLazyBitblaster::vars_iterator BVQuickCheck::endVars() {
   return d_bitblaster->endVars(); 
 }
 

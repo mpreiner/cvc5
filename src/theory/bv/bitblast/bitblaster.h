@@ -181,19 +181,19 @@ TBitblaster<T>::TBitblaster() : d_termCache(), d_modelCache(), d_bvp(NULL)
 template <class T>
 bool TBitblaster<T>::hasBBTerm(TNode node) const
 {
-  return d_termCache.get()->find(node) != d_termCache.get()->end();
+  return d_termCache->find(node) != d_termCache->end();
 }
 template <class T>
 void TBitblaster<T>::getBBTerm(TNode node, Bits& bits) const
 {
   Assert(hasBBTerm(node));
-  bits = d_termCache.get()->find(node)->second;
+  bits = d_termCache->find(node)->second;
 }
 
 template <class T>
 void TBitblaster<T>::storeBBTerm(TNode node, const Bits& bits)
 {
-  d_termCache.get()->insert_safe(node, bits);
+  d_termCache->insert_safe(node, bits);
 }
 
 template <class T>

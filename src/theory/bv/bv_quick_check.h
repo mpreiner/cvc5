@@ -25,6 +25,7 @@
 #include "context/cdo.h"
 #include "expr/node.h"
 #include "prop/sat_solver_types.h"
+#include "theory/bv/bitblast/lazy_bitblaster.h"
 #include "theory/bv/theory_bv_utils.h"
 #include "util/statistics_registry.h"
 
@@ -35,7 +36,6 @@ class TheoryModel;
 
 namespace bv {
 
-class TLazyBitblaster;
 class TheoryBV;
 
 class BVQuickCheck {
@@ -99,9 +99,8 @@ public:
   uint64_t computeAtomWeight(TNode atom, NodeSet& seen);
   bool collectModelInfo(theory::TheoryModel* model, bool fullModel);
 
-  typedef std::unordered_set<TNode, TNodeHashFunction>::const_iterator vars_iterator;
-  vars_iterator beginVars(); 
-  vars_iterator endVars(); 
+  TLazyBitblaster::vars_iterator beginVars();
+  TLazyBitblaster::vars_iterator endVars();
 
   Node getVarValue(TNode var, bool fullModel); 
 

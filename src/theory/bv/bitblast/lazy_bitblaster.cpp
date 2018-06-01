@@ -69,7 +69,7 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c,
       d_nullRegistrar(new prop::NullRegistrar()),
       d_assertedAtoms(new (true) context::CDList<prop::SatLiteral>(c)),
       d_explanations(new (true) ExplanationMap(c)),
-      d_variables(),
+      d_variables(new(true) context::CDHashSet<Node, NodeHashFunction>(c)),
       d_bbAtoms(new(true) context::CDHashSet<Node, NodeHashFunction>(c)),
       d_abstraction(NULL),
       d_emptyNotify(emptyNotify),
@@ -101,11 +101,7 @@ void TLazyBitblaster::setAbstraction(AbstractionModule* abs) {
   d_abstraction = abs;
 }
 
-TLazyBitblaster::~TLazyBitblaster()
-{
-  d_assertedAtoms->deleteSelf();
-  d_explanations->deleteSelf();
-}
+TLazyBitblaster::~TLazyBitblaster() {}
 
 
 /**
@@ -191,17 +187,17 @@ void TLazyBitblaster::storeBBAtom(TNode atom, Node atom_bb) {
   if( d_bvp != NULL ){
     d_bvp->registerAtomBB(atom.toExpr(), atom_bb.toExpr());
   }
-  d_bbAtoms.get()->insert(atom);
+  d_bbAtoms->insert(atom);
 }
 
 void TLazyBitblaster::storeBBTerm(TNode node, const Bits& bits) {
   if( d_bvp ){ d_bvp->registerTermBB(node.toExpr()); }
-  d_termCache.get()->insert_safe(node, bits);
+  d_termCache->insert_safe(node, bits);
 }
 
 
 bool TLazyBitblaster::hasBBAtom(TNode atom) const {
-  return d_bbAtoms.get()->find(atom) != d_bbAtoms.get()->end();
+  return d_bbAtoms->find(atom) != d_bbAtoms->end();
 }
 
 
@@ -210,7 +206,7 @@ void TLazyBitblaster::makeVariable(TNode var, Bits& bits) {
   for (unsigned i = 0; i < utils::getSize(var); ++i) {
     bits.push_back(utils::mkBitOf(var, i));
   }
-  d_variables.insert(var);
+  d_variables->insert(var);
 }
 
 uint64_t TLazyBitblaster::computeAtomWeight(TNode node, NodeSet& seen)
@@ -544,7 +540,7 @@ bool TLazyBitblaster::collectModelInfo(TheoryModel* m, bool fullModel)
   for (std::set<Node>::const_iterator it = termSet.begin(); it != termSet.end(); ++it) {
     TNode var = *it;
     // not actually a leaf of the bit-vector theory
-    if (d_variables.find(var) == d_variables.end())
+    if (d_variables->find(var) == d_variables->end())
       continue;
 
     Assert (Theory::theoryOf(var) == theory::THEORY_BV || isSharedTerm(var));
@@ -573,14 +569,14 @@ void TLazyBitblaster::setProofLog( BitVectorProof * bvp ){
 }
 
 void TLazyBitblaster::clearSolver() {
-  Assert (d_context->getLevel() == 0);
-  d_assertedAtoms->deleteSelf();
-  d_assertedAtoms = new(true) context::CDList<prop::SatLiteral>(d_context);
-  d_explanations->deleteSelf();
-  d_explanations = new (true) ExplanationMap(d_context);
+  Assert(d_context->getLevel() == 0);
+  d_assertedAtoms.reset(new (true)
+                            context::CDList<prop::SatLiteral>(d_context));
+  d_explanations.reset(new (true) ExplanationMap(d_context));
   d_bbAtoms.reset(new (true)
                       context::CDHashSet<Node, NodeHashFunction>(d_context));
-  d_variables.clear();
+  d_variables.reset(new (true)
+                      context::CDHashSet<Node, NodeHashFunction>(d_context));
   d_termCache.reset(new (true) TermDefMap(d_context));
 
   invalidateModelCache();

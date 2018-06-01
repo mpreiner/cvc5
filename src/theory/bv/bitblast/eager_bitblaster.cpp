@@ -131,7 +131,7 @@ void EagerBitblaster::storeBBTerm(TNode node, const Bits& bits) {
   if (d_bvp) {
     d_bvp->registerTermBB(node.toExpr());
   }
-  d_termCache.get()->insert_safe(node, bits);
+  d_termCache->insert_safe(node, bits);
 }
 
 bool EagerBitblaster::hasBBAtom(TNode atom) const {
