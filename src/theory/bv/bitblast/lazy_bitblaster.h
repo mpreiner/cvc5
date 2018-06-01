@@ -125,10 +125,9 @@ class TLazyBitblaster : public TBitblaster<Node>
   };
 
   TheoryBV* d_bv;
-  context::Context* d_ctx;
 
+  context::Context *d_context;
   std::unique_ptr<prop::NullRegistrar> d_nullRegistrar;
-  std::unique_ptr<context::Context> d_nullContext;
   // sat solver used for bitblasting and associated CnfStream
   std::unique_ptr<prop::BVSatSolverInterface> d_satSolver;
   std::unique_ptr<prop::BVSatSolverInterface::Notify> d_satSolverNotify;

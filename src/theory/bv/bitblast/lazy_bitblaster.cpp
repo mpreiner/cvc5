@@ -65,9 +65,8 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c,
                                  bool emptyNotify)
     : TBitblaster<Node>(),
       d_bv(bv),
-      d_ctx(c),
+      d_context(c),
       d_nullRegistrar(new prop::NullRegistrar()),
-      d_nullContext(new context::Context()),
       d_assertedAtoms(new (true) context::CDList<prop::SatLiteral>(c)),
       d_explanations(new (true) ExplanationMap(c)),
       d_variables(),
@@ -84,7 +83,7 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c,
   d_cnfStream.reset(
       new prop::TseitinCnfStream(d_satSolver.get(),
                                  d_nullRegistrar.get(),
-                                 d_nullContext.get(),
+                                 d_context,
                                  options::proof(),
                                  "LazyBitblaster"));
 
@@ -569,15 +568,15 @@ bool TLazyBitblaster::collectModelInfo(TheoryModel* m, bool fullModel)
 void TLazyBitblaster::setProofLog( BitVectorProof * bvp ){
   d_bvp = bvp;
   d_satSolver->setProofLog( bvp );
-  bvp->initCnfProof(d_cnfStream.get(), d_nullContext.get());
+  bvp->initCnfProof(d_cnfStream.get(), d_context);
 }
 
 void TLazyBitblaster::clearSolver() {
-  Assert (d_ctx->getLevel() == 0);
+  Assert (d_context->getLevel() == 0);
   d_assertedAtoms->deleteSelf();
-  d_assertedAtoms = new(true) context::CDList<prop::SatLiteral>(d_ctx);
+  d_assertedAtoms = new(true) context::CDList<prop::SatLiteral>(d_context);
   d_explanations->deleteSelf();
-  d_explanations = new(true) ExplanationMap(d_ctx);
+  d_explanations = new(true) ExplanationMap(d_context);
   d_bbAtoms.clear();
   d_variables.clear();
   d_termCache.clear();
@@ -585,9 +584,9 @@ void TLazyBitblaster::clearSolver() {
   invalidateModelCache();
   // recreate sat solver
   d_satSolver.reset(
-      prop::SatSolverFactory::createMinisat(d_ctx, smtStatisticsRegistry()));
+      prop::SatSolverFactory::createMinisat(d_context, smtStatisticsRegistry()));
   d_cnfStream.reset(new prop::TseitinCnfStream(
-      d_satSolver.get(), d_nullRegistrar.get(), d_nullContext.get()));
+      d_satSolver.get(), d_nullRegistrar.get(), d_context));
   d_satSolverNotify.reset(
       d_emptyNotify
           ? (prop::BVSatSolverInterface::Notify*)new MinisatEmptyNotify()
