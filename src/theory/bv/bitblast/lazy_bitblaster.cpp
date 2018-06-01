@@ -70,7 +70,7 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c,
       d_assertedAtoms(new (true) context::CDList<prop::SatLiteral>(c)),
       d_explanations(new (true) ExplanationMap(c)),
       d_variables(),
-      d_bbAtoms(),
+      d_bbAtoms(new(true) context::CDHashSet<Node, NodeHashFunction>(c)),
       d_abstraction(NULL),
       d_emptyNotify(emptyNotify),
       d_fullModelAssertionLevel(c, 0),
@@ -190,7 +190,7 @@ void TLazyBitblaster::storeBBAtom(TNode atom, Node atom_bb) {
   if( d_bvp != NULL ){
     d_bvp->registerAtomBB(atom.toExpr(), atom_bb.toExpr());
   }
-  d_bbAtoms.insert(atom);
+  d_bbAtoms.get()->insert(atom);
 }
 
 void TLazyBitblaster::storeBBTerm(TNode node, const Bits& bits) {
@@ -200,7 +200,7 @@ void TLazyBitblaster::storeBBTerm(TNode node, const Bits& bits) {
 
 
 bool TLazyBitblaster::hasBBAtom(TNode atom) const {
-  return d_bbAtoms.find(atom) != d_bbAtoms.end();
+  return d_bbAtoms.get()->find(atom) != d_bbAtoms.get()->end();
 }
 
 
@@ -576,8 +576,9 @@ void TLazyBitblaster::clearSolver() {
   d_assertedAtoms->deleteSelf();
   d_assertedAtoms = new(true) context::CDList<prop::SatLiteral>(d_context);
   d_explanations->deleteSelf();
-  d_explanations = new(true) ExplanationMap(d_context);
-  d_bbAtoms.clear();
+  d_explanations = new (true) ExplanationMap(d_context);
+  d_bbAtoms.reset(new (true)
+                      context::CDHashSet<Node, NodeHashFunction>(d_context));
   d_variables.clear();
   d_termCache.clear();
 

@@ -140,7 +140,7 @@ class TLazyBitblaster : public TBitblaster<Node>
                                     for the propagated literals. Only used when
                                     bvEagerPropagate option enabled. */
   TNodeSet d_variables;
-  TNodeSet d_bbAtoms;
+  std::unique_ptr<context::CDHashSet<Node, NodeHashFunction>> d_bbAtoms;
   AbstractionModule* d_abstraction;
   bool d_emptyNotify;
 
