@@ -48,7 +48,7 @@ class TBitblaster
 {
  protected:
   typedef std::vector<T> Bits;
-  typedef std::unordered_map<Node, Bits, NodeHashFunction> TermDefMap;
+  using TermDefMap = context::CDInsertHashMap<Node, Bits, NodeHashFunction>;
   typedef std::unordered_set<TNode, TNodeHashFunction> TNodeSet;
   typedef std::unordered_map<Node, Node, NodeHashFunction> ModelCache;
 
@@ -56,7 +56,7 @@ class TBitblaster
   typedef T (*AtomBBStrategy)(TNode, TBitblaster<T>*);
 
   // caches and mappings
-  TermDefMap d_termCache;
+  std::unique_ptr<TermDefMap> d_termCache;
   ModelCache d_modelCache;
 
   BitVectorProof* d_bvp;
@@ -181,19 +181,19 @@ TBitblaster<T>::TBitblaster() : d_termCache(), d_modelCache(), d_bvp(NULL)
 template <class T>
 bool TBitblaster<T>::hasBBTerm(TNode node) const
 {
-  return d_termCache.find(node) != d_termCache.end();
+  return d_termCache.get()->find(node) != d_termCache.get()->end();
 }
 template <class T>
 void TBitblaster<T>::getBBTerm(TNode node, Bits& bits) const
 {
   Assert(hasBBTerm(node));
-  bits = d_termCache.find(node)->second;
+  bits = d_termCache.get()->find(node)->second;
 }
 
 template <class T>
 void TBitblaster<T>::storeBBTerm(TNode node, const Bits& bits)
 {
-  d_termCache.insert(std::make_pair(node, bits));
+  d_termCache.get()->insert_safe(node, bits);
 }
 
 template <class T>

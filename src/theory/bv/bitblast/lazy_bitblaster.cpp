@@ -77,6 +77,7 @@ TLazyBitblaster::TLazyBitblaster(context::Context* c,
       d_name(name),
       d_statistics(name)
 {
+  d_termCache.reset(new (true) TermDefMap(d_context));
   d_satSolver.reset(
       prop::SatSolverFactory::createMinisat(c, smtStatisticsRegistry(), name));
 
@@ -195,7 +196,7 @@ void TLazyBitblaster::storeBBAtom(TNode atom, Node atom_bb) {
 
 void TLazyBitblaster::storeBBTerm(TNode node, const Bits& bits) {
   if( d_bvp ){ d_bvp->registerTermBB(node.toExpr()); }
-  d_termCache.insert(std::make_pair(node, bits));
+  d_termCache.get()->insert_safe(node, bits);
 }
 
 
@@ -580,7 +581,7 @@ void TLazyBitblaster::clearSolver() {
   d_bbAtoms.reset(new (true)
                       context::CDHashSet<Node, NodeHashFunction>(d_context));
   d_variables.clear();
-  d_termCache.clear();
+  d_termCache.reset(new (true) TermDefMap(d_context));
 
   invalidateModelCache();
   // recreate sat solver
