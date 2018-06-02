@@ -658,6 +658,18 @@ class ContextObj {
 };/* class ContextObj */
 
 /**
+ * Custom deleter for wrapping ContextObj in std::unique_ptr, which takes care
+ * of destroying the context-dependent object.
+ *
+ * E.g.: std::unique_ptr<CDList<...>, ContextObjDeleter> a_ptr;
+ */
+template <typename T>
+struct ContextObjDeleter
+{
+  void operator()(T* o) const { o->deleteSelf(); }
+};
+
+/**
  * For more flexible context-dependent behavior than that provided by
  * ContextObj, objects may implement the ContextNotifyObj interface
  * and simply get a notification when a pop has occurred.  See

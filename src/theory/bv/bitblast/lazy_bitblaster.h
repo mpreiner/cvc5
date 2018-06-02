@@ -136,13 +136,19 @@ class TLazyBitblaster : public TBitblaster<Node>
 
   /* context dependent list storing the atoms currently asserted by the DPLL
    * SAT solver. */
-  std::unique_ptr<AssertionList> d_assertedAtoms;
+  std::unique_ptr<AssertionList, context::ContextObjDeleter<AssertionList>>
+      d_assertedAtoms;
   /* context dependent list of explanations for the propagated literals. Only
    * used when bvEagerPropagate option enabled. */
-  std::unique_ptr<ExplanationMap> d_explanations;
+  std::unique_ptr<ExplanationMap, context::ContextObjDeleter<ExplanationMap>>
+      d_explanations;
 
-  std::unique_ptr<context::CDHashSet<Node, NodeHashFunction>> d_variables;
-  std::unique_ptr<context::CDHashSet<Node, NodeHashFunction>> d_bbAtoms;
+  using CDNodeHashSet = context::CDHashSet<Node, NodeHashFunction>;
+
+  std::unique_ptr<CDNodeHashSet, context::ContextObjDeleter<CDNodeHashSet>>
+      d_variables;
+  std::unique_ptr<CDNodeHashSet, context::ContextObjDeleter<CDNodeHashSet>>
+      d_bbAtoms;
   AbstractionModule* d_abstraction;
   bool d_emptyNotify;
 

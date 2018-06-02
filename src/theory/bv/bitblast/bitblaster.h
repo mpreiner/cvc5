@@ -56,7 +56,8 @@ class TBitblaster
   typedef T (*AtomBBStrategy)(TNode, TBitblaster<T>*);
 
   // caches and mappings
-  std::unique_ptr<TermDefMap> d_termCache;
+  std::unique_ptr<TermDefMap, context::ContextObjDeleter<TermDefMap>>
+      d_termCache;
   ModelCache d_modelCache;
 
   BitVectorProof* d_bvp;
