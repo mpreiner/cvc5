@@ -29,6 +29,11 @@ using namespace CVC4::context;
 using namespace std;
 using namespace CVC4::theory::bv::utils;
 
+bool AbstractionModule::isAbstrSkolem(TNode node)
+{
+  return d_skolems.find(node) != d_skolems.end();
+}
+
 bool AbstractionModule::applyAbstraction(const std::vector<Node>& assertions,
                                          std::vector<Node>& new_assertions)
 {
@@ -292,9 +297,11 @@ Node AbstractionModule::getSignatureSkolem(TNode node)
   {
     ostringstream os;
     os << "sig_" << bitwidth << "_" << index;
-    skolems.push_back(nm->mkSkolem(os.str(),
-                                   nm->mkBitVectorType(bitwidth),
-                                   "skolem for computing signatures"));
+    Node sk = nm->mkSkolem(os.str(),
+                           nm->mkBitVectorType(bitwidth),
+                           "skolem for computing signatures");
+    d_skolems.insert(sk);
+    skolems.push_back(sk);
   }
   ++(d_signatureIndices[bitwidth]);
   return skolems[index];
@@ -363,27 +370,20 @@ Node AbstractionModule::computeSignatureRec(TNode node, NodeNodeMap& cache) {
  * @return
  */
 int AbstractionModule::comparePatterns(TNode s, TNode t) {
-  if (s.getKind() == kind::SKOLEM &&
-      t.getKind() == kind::SKOLEM) {
-    return 0;
+  if ((s.getKind() == kind::CONST_BITVECTOR
+       && t.getKind() == kind::CONST_BITVECTOR)
+      || (isAbstrSkolem(s) && isAbstrSkolem(t)))
+  {
+    return (s == t) ? 0 : -1;
   }
 
-  if (s.getKind() == kind::CONST_BITVECTOR &&
-      t.getKind() == kind::CONST_BITVECTOR) {
-    if (s == t) {
-      return 0;
-    } else {
-      return -1;
-    }
-  }
-
-  if (s.getKind() == kind::SKOLEM &&
-      t.getKind() == kind::CONST_BITVECTOR) {
+  if (isAbstrSkolem(s) && t.getKind() == kind::CONST_BITVECTOR)
+  {
     return 1;
   }
 
-  if (s.getKind() == kind::CONST_BITVECTOR &&
-      t.getKind() == kind::SKOLEM) {
+  if (s.getKind() == kind::CONST_BITVECTOR && isAbstrSkolem(t))
+  {
     return 2;
   }
 
@@ -518,6 +518,7 @@ void AbstractionModule::finalizeSignatures()
     Node abs_func =
         nm->mkSkolem("abs_$$", abs_type, "abstraction function for bv theory");
     Debug("bv-abstraction") << " abstracted by function " << abs_func << "\n";
+    d_skolems.insert(abs_func);
 
     // NOTE: signature expression type is BOOLEAN
     d_signatureToFunc[signature] = abs_func;
@@ -534,7 +535,8 @@ void AbstractionModule::collectArgumentTypes(TNode sig, std::vector<TypeNode>& t
   if (seen.find(sig) != seen.end())
     return;
 
-  if (sig.getKind() == kind::SKOLEM) {
+  if (isAbstrSkolem(sig))
+  {
     types.push_back(sig.getType());
     seen.insert(sig);
     return;
@@ -550,12 +552,13 @@ void AbstractionModule::collectArguments(TNode node, TNode signature, std::vecto
   if (seen.find(node)!= seen.end())
     return;
 
-  if (node.getMetaKind() == kind::metakind::VARIABLE
+  if (node.getKind() == kind::VARIABLE
       || node.getKind() == kind::CONST_BITVECTOR)
   {
     // a constant in the node can either map to an argument of the abstraction
     // or can be hard-coded and part of the abstraction
-    if (signature.getKind() == kind::SKOLEM) {
+    if (isAbstrSkolem(signature))
+    {
       args.push_back(node);
       seen.insert(node);
     } else {
@@ -660,14 +663,15 @@ Node AbstractionModule::substituteArguments(TNode signature, TNode apply, unsign
     return seen[signature];
   }
 
-  if (signature.getKind() == kind::SKOLEM) {
+  if (isAbstrSkolem(signature))
+  {
     // return corresponding argument and increment counter
     seen[signature] = apply[index];
     return apply[index++];
   }
 
   if (signature.getNumChildren() == 0) {
-    Assert(signature.getKind() != kind::metakind::VARIABLE);
+    Assert(signature.getKind() != kind::VARIABLE);
     seen[signature] = signature;
     return signature;
   }

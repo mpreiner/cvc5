@@ -83,7 +83,7 @@ class AbstractionModule {
    *
    * @return 1 if s :> t, 2 if s <: t, 0 if they equivalent and -1 if they are incomparable
    */
-  static int comparePatterns(TNode s, TNode t);
+  int comparePatterns(TNode s, TNode t);
 
   class LemmaInstantiatior {
     std::vector<TNode> d_functions;
@@ -128,6 +128,7 @@ class AbstractionModule {
   typedef std::unordered_map<Node, Node, NodeHashFunction> NodeNodeMap;
   typedef std::unordered_map<Node, TNode, NodeHashFunction> TNodeNodeMap;
   typedef std::unordered_set<TNode, TNodeHashFunction> TNodeSet;
+  using NodeSet = std::unordered_set<Node, NodeHashFunction>;
   typedef std::unordered_map<unsigned, Node> IntNodeMap;
   typedef std::unordered_map<unsigned, unsigned> IndexMap;
   typedef std::unordered_map<unsigned, std::vector<Node> > SkolemMap;
@@ -143,7 +144,8 @@ class AbstractionModule {
   NodeNodeMap d_assertionToSignature;
   SignatureMap d_signatures;
   NodeNodeMap d_sigToGeneralization;
-  TNodeSet d_skolems;
+  NodeSet d_skolems;
+  bool isAbstrSkolem(TNode node);
 
   // skolems maps
   IndexMap d_signatureIndices;
