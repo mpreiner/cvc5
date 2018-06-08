@@ -792,8 +792,9 @@ void AbstractionModule::generalizeConflict(TNode conflict, std::vector<Node>& le
   // collect abstract functions
   if (conflict.getKind() != kind::AND) {
     if (isAbstraction(conflict)) {
-      Assert (conflict[0].getKind() == kind::APPLY_UF);
-      functions.push_back(conflict[0]);
+      Assert (conflict[0].getKind() == kind::APPLY_UF
+              || conflict[1].getKind() == kind::APPLY_UF);
+      functions.push_back(conflict[0].getKind() == kind::APPLY_UF ? conflict[0] : conflict[1]);
     }
   } else {
     for (unsigned i = 0; i < conflict.getNumChildren(); ++i) {
