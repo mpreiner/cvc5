@@ -1478,6 +1478,7 @@ enum CVC4_PUBLIC Kind : int32_t
    * arrays, the solver doesn't know what to do and aborts (Issue #1667).
    */
   STORE_ALL,
+  EQ_RANGE,
 #if 0
   /* array table function (internal-only symbol) */
   ARR_TABLE_FUN,
