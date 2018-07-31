@@ -76,6 +76,8 @@ CryptoMinisatSolver::CryptoMinisatSolver(StatisticsRegistry* registry,
 , d_okay(true)
 , d_statistics(registry, name)
 {
+  //d_solver->set_default_polarity(false); // TODO: test if better
+
   d_true = newVar();
   d_false = newVar();
 

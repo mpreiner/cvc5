@@ -101,11 +101,11 @@ TheoryBV::TheoryBV(context::Context* c,
     d_subtheoryMap[SUB_ALGEBRAIC] = d_subtheories.back().get();
   }
 
+#if 1
   BitblastSolverCms* bb_solver_cms = new BitblastSolverCms(c, this);
   d_subtheories.push_back(bb_solver_cms);
   d_subtheoryMap[SUB_BITBLAST_CMS] = bb_solver_cms;
-
-#if 0
+#else
   BitblastSolver* bb_solver = new BitblastSolver(c, this);
   if (options::bvAbstraction())
   {
