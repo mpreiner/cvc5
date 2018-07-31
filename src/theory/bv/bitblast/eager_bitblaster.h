@@ -52,6 +52,7 @@ class EagerBitblaster : public TBitblaster<Node>
   bool assertToSat(TNode node, bool propagate = true);
   bool solve();
   bool solve(const std::vector<Node>& assumptions);
+  std::vector<Node> getUnsatAssumptions(void);
   bool collectModelInfo(TheoryModel* m, bool fullModel);
   void setProofLog(BitVectorProof* bvp);
 

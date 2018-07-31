@@ -40,6 +40,15 @@ CMSat::Lit toInternalLit(SatLiteral lit)
   return CMSat::Lit(lit.getSatVariable(), lit.isNegated());
 }
 
+SatLiteral toSatLiteral(CMSat::Lit lit)
+{
+  if (lit == CMSat::lit_Undef)
+  {
+    return undefSatLiteral;
+  }
+  return SatLiteral(SatVariable(lit.var()), lit.sign());
+}
+
 SatValue toSatLiteralValue(CMSat::lbool res)
 {
   if (res == CMSat::l_True) return SAT_VALUE_TRUE;
@@ -174,6 +183,18 @@ SatValue CryptoMinisatSolver::solve(const std::vector<SatLiteral>& assumptions)
   }
   ++d_statistics.d_statCallsToSolve;
   return toSatLiteralValue(d_solver->solve(&assumpts));
+}
+
+std::vector<SatLiteral> CryptoMinisatSolver::getUnsatAssumptions()
+{
+  std::vector<SatLiteral> assumpts;
+
+  const std::vector<CMSat::Lit>& conflict = d_solver->get_conflict();
+  for (const CMSat::Lit& lit : conflict)
+  {
+    assumpts.push_back(toSatLiteral(lit));
+  }
+  return assumpts;
 }
 
 SatValue CryptoMinisatSolver::value(SatLiteral l){

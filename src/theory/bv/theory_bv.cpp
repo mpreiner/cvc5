@@ -25,6 +25,7 @@
 #include "theory/bv/bv_eager_solver.h"
 #include "theory/bv/bv_subtheory_algebraic.h"
 #include "theory/bv/bv_subtheory_bitblast.h"
+#include "theory/bv/bv_subtheory_bitblast_cms.h"
 #include "theory/bv/bv_subtheory_core.h"
 #include "theory/bv/bv_subtheory_inequality.h"
 #include "theory/bv/slicer.h"
@@ -100,6 +101,11 @@ TheoryBV::TheoryBV(context::Context* c,
     d_subtheoryMap[SUB_ALGEBRAIC] = d_subtheories.back().get();
   }
 
+  BitblastSolverCms* bb_solver_cms = new BitblastSolverCms(c, this);
+  d_subtheories.push_back(bb_solver_cms);
+  d_subtheoryMap[SUB_BITBLAST_CMS] = bb_solver_cms;
+
+#if 0
   BitblastSolver* bb_solver = new BitblastSolver(c, this);
   if (options::bvAbstraction())
   {
@@ -107,6 +113,7 @@ TheoryBV::TheoryBV(context::Context* c,
   }
   d_subtheories.emplace_back(bb_solver);
   d_subtheoryMap[SUB_BITBLAST] = bb_solver;
+#endif
 }
 
 TheoryBV::~TheoryBV() {}

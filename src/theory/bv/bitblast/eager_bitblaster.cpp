@@ -123,7 +123,7 @@ void EagerBitblaster::bbAtom(TNode node)
   Node atom_definition =
       NodeManager::currentNM()->mkNode(kind::EQUAL, node, atom_bb);
 
-  AlwaysAssert(options::bitblastMode() == theory::bv::BITBLAST_MODE_EAGER);
+  //  AlwaysAssert(options::bitblastMode() == theory::bv::BITBLAST_MODE_EAGER);
   storeBBAtom(node, atom_bb);
   d_cnfStream->convertAndAssert(
       atom_definition, false, false, RULE_INVALID, TNode::null());
@@ -204,6 +204,19 @@ bool EagerBitblaster::solve(const std::vector<Node>& assumptions)
     assumpts.push_back(d_cnfStream->getLiteral(assumption));
   }
   return prop::SAT_VALUE_TRUE == d_satSolver->solve(assumpts);
+}
+
+std::vector<Node> EagerBitblaster::getUnsatAssumptions()
+{
+  std::vector<prop::SatLiteral> unsat_assumpts =
+      d_satSolver->getUnsatAssumptions();
+  std::vector<Node> result;
+
+  for (const prop::SatLiteral& lit : unsat_assumpts)
+  {
+    result.push_back(d_cnfStream->getNode(lit));
+  }
+  return result;
 }
 
 /**

@@ -82,6 +82,11 @@ public:
     Unimplemented("Solving under assumptions not implemented");
   };
 
+  virtual std::vector<SatLiteral> getUnsatAssumptions()
+  {
+    Unimplemented("Solving under assumptions not implemented");
+  };
+
   /** Interrupt the solver */
   virtual void interrupt() = 0;
 

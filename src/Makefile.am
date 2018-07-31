@@ -377,6 +377,8 @@ libcvc4_la_SOURCES = \
 	theory/bv/bv_subtheory_algebraic.h \
 	theory/bv/bv_subtheory_bitblast.cpp \
 	theory/bv/bv_subtheory_bitblast.h \
+	theory/bv/bv_subtheory_bitblast_cms.cpp \
+	theory/bv/bv_subtheory_bitblast_cms.h \
 	theory/bv/bv_subtheory_core.cpp \
 	theory/bv/bv_subtheory_core.h \
 	theory/bv/bv_subtheory_inequality.cpp \

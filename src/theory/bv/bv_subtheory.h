@@ -30,17 +30,20 @@ class TheoryModel;
 
 namespace bv {
 
-enum SubTheory {
+enum SubTheory
+{
   SUB_CORE = 1,
   SUB_BITBLAST = 2,
   SUB_INEQUALITY = 3,
-  SUB_ALGEBRAIC = 4
+  SUB_ALGEBRAIC = 4,
+  SUB_BITBLAST_CMS = 5
 };
 
 inline std::ostream& operator<<(std::ostream& out, SubTheory subtheory) {
   switch (subtheory) {
     case SUB_BITBLAST:
       return out << "BITBLASTER";
+    case SUB_BITBLAST_CMS: return out << "BITBLASTER_CMS";
     case SUB_CORE:
       return out << "BV_CORE_SUBTHEORY";
     case SUB_INEQUALITY:

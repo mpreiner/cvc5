@@ -253,6 +253,7 @@ private:
   friend class TLazyBitblaster;
   friend class EagerBitblaster;
   friend class BitblastSolver;
+  friend class BitblastSolverCms;
   friend class EqualitySolver;
   friend class CoreSolver;
   friend class InequalitySolver;

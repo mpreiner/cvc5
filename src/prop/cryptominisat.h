@@ -65,6 +65,7 @@ public:
   SatValue solve() override;
   SatValue solve(long unsigned int&) override;
   SatValue solve(const std::vector<SatLiteral>& assumptions) override;
+  std::vector<SatLiteral> getUnsatAssumptions() override;
 
   bool ok() const override;
   SatValue value(SatLiteral l) override;
