@@ -59,6 +59,13 @@ bool BitblastSolverCms::check(Theory::Effort e)
   while (!done())
   {
     TNode fact = get();
+
+    // skip facts involving integer equalities (from bv2nat)
+    if (!utils::isBitblastAtom(fact))
+    {
+      continue;
+    }
+
     //    std::cout << "  fact: " << fact << std::endl;
     d_bitblaster->bbFormula(fact, false);
     d_assumptions.push_back(fact);
@@ -99,6 +106,11 @@ bool BitblastSolverCms::collectModelInfo(TheoryModel* m, bool fullModel)
 
 Node BitblastSolverCms::getModelValue(TNode node)
 {
+  if (d_bv->d_invalidateModelCache.get())
+  {
+    d_bitblaster->invalidateModelCache();
+  }
+  d_bv->d_invalidateModelCache.set(false);
   Node value = d_bitblaster->getTermModel(node, true);
   return value;
 }

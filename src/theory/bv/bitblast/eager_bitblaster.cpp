@@ -257,24 +257,27 @@ Node EagerBitblaster::getModelFromSatSolver(TNode a, bool fullModel) {
 
 bool EagerBitblaster::collectModelInfo(TheoryModel* m, bool fullModel)
 {
-  TNodeSet::iterator it = d_variables.begin();
-  for (; it != d_variables.end(); ++it) {
-    TNode var = *it;
-    if (d_bv->isLeaf(var) || isSharedTerm(var) ||
-        (var.isVar() && var.getType().isBoolean())) {
-      // only shared terms could not have been bit-blasted
-      Assert(hasBBTerm(var) || isSharedTerm(var));
+  std::set<Node> termSet;
+  d_bv->computeRelevantTerms(termSet);
+  for (TNode var : termSet)
+  {
+    // not actually a leaf of the bit-vector theory
+    if (d_variables.find(var) == d_variables.end()) continue;
 
-      Node const_value = getModelFromSatSolver(var, true);
+    Assert(Theory::theoryOf(var) == theory::THEORY_BV || isSharedTerm(var));
+    // only shared terms could not have been bit-blasted
+    Assert(hasBBTerm(var) || isSharedTerm(var));
 
-      if (const_value != Node()) {
-        Debug("bitvector-model")
-            << "EagerBitblaster::collectModelInfo (assert (= " << var << " "
-            << const_value << "))\n";
-        if (!m->assertEquality(var, const_value, true))
-        {
-          return false;
-        }
+    Node const_value = getModelFromSatSolver(var, true);
+    Assert(const_value.isNull() || const_value.isConst());
+    if (const_value != Node())
+    {
+      Debug("bitvector-model")
+          << "TLazyBitblaster::collectModelInfo (assert (= " << var << " "
+          << const_value << "))\n";
+      if (!m->assertEquality(var, const_value, true))
+      {
+        return false;
       }
     }
   }
