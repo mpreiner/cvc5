@@ -94,7 +94,7 @@ void EagerBitblastSolver::assertFormula(TNode formula) {
   else
   {
     bool assert_formula =
-        options::incrementalSolving() && d_context->getLevel() > 1;
+        !options::incrementalSolving() || d_context->getLevel() == 0;
     d_bitblaster->bbFormula(formula, assert_formula);
   }
 }
