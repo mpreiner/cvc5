@@ -40,7 +40,14 @@ BitblastSolverCms::Statistics::~Statistics() {}
 
 void BitblastSolverCms::preRegister(TNode node)
 {
-  //  std::cout << "pre-register: " << node << std::endl;
+  if ((node.getKind() == kind::EQUAL || node.getKind() == kind::BITVECTOR_ULT
+       || node.getKind() == kind::BITVECTOR_ULE
+       || node.getKind() == kind::BITVECTOR_SLT
+       || node.getKind() == kind::BITVECTOR_SLE)
+      && !d_bitblaster->hasBBAtom(node))
+  {
+    d_bitblaster->bbAtom(node);
+  }
 }
 
 void BitblastSolverCms::explain(TNode literal, std::vector<TNode>& assumptions)
