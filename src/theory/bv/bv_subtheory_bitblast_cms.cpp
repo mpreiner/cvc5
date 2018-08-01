@@ -26,7 +26,7 @@ namespace bv {
 
 BitblastSolverCms::BitblastSolverCms(context::Context* c, TheoryBV* bv)
     : SubtheorySolver(c, bv),
-      d_bitblaster(new EagerBitblaster(bv, c)),
+      d_bitblaster(new EagerBitblaster(bv, c, SAT_SOLVER_CRYPTOMINISAT)),
       d_assumptions(c),
       d_statistics()
 {
@@ -60,7 +60,7 @@ bool BitblastSolverCms::check(Theory::Effort e)
   {
     TNode fact = get();
     //    std::cout << "  fact: " << fact << std::endl;
-    d_bitblaster->bbAtom(fact);
+    d_bitblaster->bbFormula(fact, false);
     d_assumptions.push_back(fact);
   }
 
@@ -94,10 +94,14 @@ EqualityStatus BitblastSolverCms::getEqualityStatus(TNode a, TNode b)
 
 bool BitblastSolverCms::collectModelInfo(TheoryModel* m, bool fullModel)
 {
-  return true;
+  return d_bitblaster->collectModelInfo(m, fullModel);
 }
 
-Node BitblastSolverCms::getModelValue(TNode node) { return Node::null(); }
+Node BitblastSolverCms::getModelValue(TNode node)
+{
+  Node value = d_bitblaster->getTermModel(node, true);
+  return value;
+}
 
 void BitblastSolverCms::setProofLog(BitVectorProof* bvp) {}
 

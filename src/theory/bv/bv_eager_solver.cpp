@@ -54,8 +54,11 @@ void EagerBitblastSolver::initialize() {
 #else
     Unreachable();
 #endif
-  } else {
-    d_bitblaster.reset(new EagerBitblaster(d_bv, d_context));
+  }
+  else
+  {
+    d_bitblaster.reset(
+        new EagerBitblaster(d_bv, d_context, options::bvSatSolver()));
     THEORY_PROOF(if (d_bvp) {
       d_bitblaster->setProofLog(d_bvp);
       d_bvp->setBitblaster(d_bitblaster.get());
@@ -90,7 +93,9 @@ void EagerBitblastSolver::assertFormula(TNode formula) {
   }
   else
   {
-    d_bitblaster->bbFormula(formula);
+    bool assert_formula =
+        options::incrementalSolving() && d_context->getLevel() > 1;
+    d_bitblaster->bbFormula(formula, assert_formula);
   }
 }
 

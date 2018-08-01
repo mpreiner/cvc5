@@ -21,10 +21,10 @@
 
 #include <unordered_set>
 
-#include "theory/bv/bitblast/bitblaster.h"
-
+#include "options/bv_bitblast_mode.h"
 #include "prop/cnf_stream.h"
 #include "prop/sat_solver.h"
+#include "theory/bv/bitblast/bitblaster.h"
 
 namespace CVC4 {
 namespace theory {
@@ -36,7 +36,9 @@ class TheoryBV;
 class EagerBitblaster : public TBitblaster<Node>
 {
  public:
-  EagerBitblaster(TheoryBV* theory_bv, context::Context* context);
+  EagerBitblaster(TheoryBV* theory_bv,
+                  context::Context* context,
+                  bv::SatSolverMode sat_solver);
   ~EagerBitblaster();
 
   void addAtom(TNode atom);
@@ -45,7 +47,7 @@ class EagerBitblaster : public TBitblaster<Node>
   void bbAtom(TNode node) override;
   Node getBBAtom(TNode node) const override;
   bool hasBBAtom(TNode atom) const override;
-  void bbFormula(TNode formula);
+  void bbFormula(TNode formula, bool assert_formula = true);
   void storeBBAtom(TNode atom, Node atom_bb) override;
   void storeBBTerm(TNode node, const Bits& bits) override;
 

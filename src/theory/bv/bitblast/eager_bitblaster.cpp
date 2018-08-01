@@ -30,7 +30,9 @@ namespace CVC4 {
 namespace theory {
 namespace bv {
 
-EagerBitblaster::EagerBitblaster(TheoryBV* theory_bv, context::Context* c)
+EagerBitblaster::EagerBitblaster(TheoryBV* theory_bv,
+                                 context::Context* c,
+                                 bv::SatSolverMode sat_solver)
     : TBitblaster<Node>(),
       d_context(c),
       d_nullContext(new context::Context()),
@@ -43,7 +45,7 @@ EagerBitblaster::EagerBitblaster(TheoryBV* theory_bv, context::Context* c)
       d_notify()
 {
   prop::SatSolver *solver = nullptr;
-  switch (options::bvSatSolver())
+  switch (sat_solver)
   {
     case SAT_SOLVER_MINISAT:
     {
@@ -76,17 +78,16 @@ EagerBitblaster::EagerBitblaster(TheoryBV* theory_bv, context::Context* c)
 
 EagerBitblaster::~EagerBitblaster() {}
 
-void EagerBitblaster::bbFormula(TNode node)
+void EagerBitblaster::bbFormula(TNode node, bool assert_formula)
 {
-  /* For incremental eager solving we assume formulas at context levels > 1. */
-  if (options::incrementalSolving() && d_context->getLevel() > 1)
-  {
-    d_cnfStream->ensureLiteral(node);
-  }
-  else
+  if (assert_formula)
   {
     d_cnfStream->convertAndAssert(
         node, false, false, RULE_INVALID, TNode::null());
+  }
+  else
+  {
+    d_cnfStream->ensureLiteral(node);
   }
 }
 
@@ -123,7 +124,6 @@ void EagerBitblaster::bbAtom(TNode node)
   Node atom_definition =
       NodeManager::currentNM()->mkNode(kind::EQUAL, node, atom_bb);
 
-  //  AlwaysAssert(options::bitblastMode() == theory::bv::BITBLAST_MODE_EAGER);
   storeBBAtom(node, atom_bb);
   d_cnfStream->convertAndAssert(
       atom_definition, false, false, RULE_INVALID, TNode::null());

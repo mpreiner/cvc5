@@ -101,19 +101,23 @@ TheoryBV::TheoryBV(context::Context* c,
     d_subtheoryMap[SUB_ALGEBRAIC] = d_subtheories.back().get();
   }
 
-#if 1
-  BitblastSolverCms* bb_solver_cms = new BitblastSolverCms(c, this);
-  d_subtheories.push_back(bb_solver_cms);
-  d_subtheoryMap[SUB_BITBLAST_CMS] = bb_solver_cms;
-#else
-  BitblastSolver* bb_solver = new BitblastSolver(c, this);
-  if (options::bvAbstraction())
+  if (options::bvSatSolver() == bv::SAT_SOLVER_CRYPTOMINISAT
+      && !options::proof())
   {
-    bb_solver->setAbstraction(d_abstractionModule.get());
+    BitblastSolverCms* bb_solver = new BitblastSolverCms(c, this);
+    d_subtheories.emplace_back(bb_solver);
+    d_subtheoryMap[SUB_BITBLAST] = bb_solver;
   }
-  d_subtheories.emplace_back(bb_solver);
-  d_subtheoryMap[SUB_BITBLAST] = bb_solver;
-#endif
+  else
+  {
+    BitblastSolver* bb_solver = new BitblastSolver(c, this);
+    if (options::bvAbstraction())
+    {
+      bb_solver->setAbstraction(d_abstractionModule);
+    }
+    d_subtheories.emplace_back(bb_solver);
+    d_subtheoryMap[SUB_BITBLAST] = bb_solver;
+  }
 }
 
 TheoryBV::~TheoryBV() {}
