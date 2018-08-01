@@ -35,7 +35,7 @@ enum SubTheory
   SUB_CORE = 1,
   SUB_BITBLAST = 2,
   SUB_INEQUALITY = 3,
-  SUB_ALGEBRAIC = 4,
+  SUB_ALGEBRAIC = 4
 };
 
 inline std::ostream& operator<<(std::ostream& out, SubTheory subtheory) {
