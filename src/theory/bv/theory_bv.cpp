@@ -101,9 +101,8 @@ TheoryBV::TheoryBV(context::Context* c,
     d_subtheoryMap[SUB_ALGEBRAIC] = d_subtheories.back().get();
   }
 
-//  if (options::bvSatSolver() == bv::SAT_SOLVER_CRYPTOMINISAT
-//      && !options::proof())
-  if (!options::proof())
+  if (options::bvSatSolver() == bv::SAT_SOLVER_CRYPTOMINISAT
+      && !options::proof())
   {
     BitblastSolverCms* bb_solver = new BitblastSolverCms(c, this);
     d_subtheories.emplace_back(bb_solver);
