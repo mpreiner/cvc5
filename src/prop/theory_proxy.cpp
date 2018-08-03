@@ -134,6 +134,7 @@ void TheoryProxy::enqueueTheoryLiteral(const SatLiteral& l) {
   Node literalNode = d_cnfStream->getNode(l);
   Debug("prop") << "enqueueing theory literal " << l << " " << literalNode << std::endl;
   Assert(!literalNode.isNull());
+  //std::cout << d_cnfStream->d_satSolver->getAssertionLevel() << " enqueue: " << literalNode << std::endl;
   d_queue.push(literalNode);
 }
 

@@ -23,6 +23,7 @@
 
 #include "theory/bv/bitblast/eager_bitblaster.h"
 #include "theory/bv/bv_subtheory.h"
+#include "theory/bv/bv_quick_check.h"
 
 namespace CVC4 {
 namespace theory {
@@ -50,6 +51,13 @@ class BitblastSolverCms : public SubtheorySolver
   EagerBitblaster* d_bitblaster;
 
   context::CDList<Node> d_assumptions;
+  context::CDHashSet<Node, NodeHashFunction> d_assertions;
+  context::CDList<Node> d_assertionsAdded;
+  context::CDQueue<TNode> d_bitblastQueue;
+  BVQuickCheck* d_quickCheck;
+  QuickXPlain* d_quickXplain;
+
+  void setConflict();
 
   struct Statistics
   {

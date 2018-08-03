@@ -62,7 +62,6 @@ public:
 
   ~TheoryProxy();
 
-
   void theoryCheck(theory::Theory::Effort effort);
 
   void explainPropagation(SatLiteral l, SatClause& explanation);

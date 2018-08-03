@@ -28,6 +28,11 @@ BitblastSolverCms::BitblastSolverCms(context::Context* c, TheoryBV* bv)
     : SubtheorySolver(c, bv),
       d_bitblaster(new EagerBitblaster(bv, c, SAT_SOLVER_CRYPTOMINISAT)),
       d_assumptions(c),
+      d_assertions(c),
+      d_assertionsAdded(c),
+      d_bitblastQueue(c),
+      d_quickCheck(options::bitvectorQuickXplain() ? new BVQuickCheck("bb", bv) : NULL),
+      d_quickXplain(options::bitvectorQuickXplain() ? new QuickXPlain("bb", d_quickCheck) :  NULL),
       d_statistics()
 {
 }
@@ -46,7 +51,13 @@ void BitblastSolverCms::preRegister(TNode node)
        || node.getKind() == kind::BITVECTOR_SLE)
       && !d_bitblaster->hasBBAtom(node))
   {
-    d_bitblaster->bbAtom(node);
+    //std::cout << "***** preregister[" << d_context->getLevel() << "]: " << node << std::endl;
+    d_bitblastQueue.push_back(node);
+    if (d_context->getLevel() == 1)
+    {
+      //d_bitblaster->bbFormula(node, true);
+      d_assertions.insert(node);
+    }
   }
 }
 
@@ -63,6 +74,13 @@ bool BitblastSolverCms::check(Theory::Effort e)
 
   //  std::cout << "check" << std::endl;
 
+  while (!d_bitblastQueue.empty())
+  {
+    TNode n = d_bitblastQueue.front();
+    d_bitblastQueue.pop();
+    d_bitblaster->bbAtom(n);
+  }
+
   while (!done())
   {
     TNode fact = get();
@@ -74,8 +92,18 @@ bool BitblastSolverCms::check(Theory::Effort e)
     }
 
     //    std::cout << "  fact: " << fact << std::endl;
-    d_bitblaster->bbFormula(fact, false);
-    d_assumptions.push_back(fact);
+    if (d_assertions.find(fact) == d_assertions.end())
+    {
+      //std::cout << "add assumption: " << fact << std::endl;
+      d_bitblaster->bbFormula(fact, false);
+      d_assumptions.push_back(fact);
+    }
+    else
+    {
+      //std::cout << "add assertion: " << fact << std::endl;
+      d_bitblaster->bbFormula(fact, true);
+      d_assertionsAdded.push_back(fact);
+    }
   }
 
   std::vector<Node> assumptions = {d_assumptions.begin(), d_assumptions.end()};
@@ -83,17 +111,7 @@ bool BitblastSolverCms::check(Theory::Effort e)
   bool ok = d_bitblaster->solve(assumptions);
   if (!ok)
   {
-    std::vector<Node> ucore = d_bitblaster->getUnsatAssumptions();
-    std::vector<Node> conflict;
-    for (const Node& n : ucore)
-    {
-      //      std::cout << "  ucore: " << n << std::endl;
-      if (n.getKind() == kind::NOT)
-        conflict.push_back(n[0]);
-      else
-        conflict.push_back(n.notNode());
-    }
-    d_bv->setConflict(utils::mkAnd(conflict));
+    setConflict();
     return false;
   }
 
@@ -120,6 +138,42 @@ Node BitblastSolverCms::getModelValue(TNode node)
   d_bv->d_invalidateModelCache.set(false);
   Node value = d_bitblaster->getTermModel(node, true);
   return value;
+}
+
+void BitblastSolverCms::setConflict()
+{
+  Node conflict;
+  std::vector<Node> ucore = d_bitblaster->getUnsatAssumptions();
+  std::vector<Node> conflictAtoms;
+  if (ucore.size() > 0)
+  {
+    for (const Node& n : ucore)
+    {
+      //      std::cout << "  ucore: " << n << std::endl;
+      if (n.getKind() == kind::NOT)
+        conflictAtoms.push_back(n[0]);
+      else
+        conflictAtoms.push_back(n.notNode());
+    }
+    conflict = utils::mkAnd(conflictAtoms);
+  }
+  else
+  {
+    std::vector<TNode> ucore = {d_assertionsAdded.begin(), d_assertionsAdded.end()};
+    conflict = utils::mkAnd(ucore);
+  }
+
+  Node final_conflict = conflict;
+  if (options::bitvectorQuickXplain() && conflict.getKind() == kind::AND)
+  {
+    final_conflict = d_quickXplain->minimizeConflict(conflict);
+//    if (conflict != final_conflict)
+//    {
+//      std::cout << "original conflict: " << conflict << std::endl;
+//      std::cout << "final conflict: " << final_conflict << std::endl;
+//    }
+  }
+  d_bv->setConflict(final_conflict);
 }
 
 void BitblastSolverCms::setProofLog(BitVectorProof* bvp) {}
