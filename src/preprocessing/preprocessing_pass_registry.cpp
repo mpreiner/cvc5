@@ -121,6 +121,7 @@ PreprocessingPassRegistry::PreprocessingPassRegistry()
   registerPassInfo("ite-simp", callCtor<ITESimp>);
   registerPassInfo("global-negate", callCtor<GlobalNegate>);
   registerPassInfo("int-to-bv", callCtor<IntToBV>);
+  registerPassInfo("eqrange-to-quant"), callCtor<EqrangeToQuant>;
   registerPassInfo("bv-to-int", callCtor<BVToInt>);
   registerPassInfo("synth-rr", callCtor<SynthRewRulesPass>);
   registerPassInfo("real-to-int", callCtor<RealToInt>);
