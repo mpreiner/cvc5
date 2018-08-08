@@ -48,14 +48,15 @@ class BitblastSolverCms : public SubtheorySolver
   void setProofLog(BitVectorProof* bvp) override;
 
  private:
-  EagerBitblaster* d_bitblaster;
+  std::unique_ptr<EagerBitblaster> d_bitblaster;
 
+  context::Context* d_context;
   context::CDList<Node> d_assumptions;
   context::CDHashSet<Node, NodeHashFunction> d_assertions;
   context::CDList<Node> d_assertionsAdded;
   context::CDQueue<TNode> d_bitblastQueue;
-  BVQuickCheck* d_quickCheck;
-  QuickXPlain* d_quickXplain;
+  std::unique_ptr<BVQuickCheck> d_quickCheck;
+  std::unique_ptr<QuickXPlain> d_quickXplain;
 
   void setConflict();
 

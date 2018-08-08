@@ -26,15 +26,21 @@ namespace bv {
 
 BitblastSolverCms::BitblastSolverCms(context::Context* c, TheoryBV* bv)
     : SubtheorySolver(c, bv),
+      d_context(c),
       d_bitblaster(new EagerBitblaster(bv, c, SAT_SOLVER_CRYPTOMINISAT)),
       d_assumptions(c),
       d_assertions(c),
       d_assertionsAdded(c),
       d_bitblastQueue(c),
-      d_quickCheck(options::bitvectorQuickXplain() ? new BVQuickCheck("bb", bv) : NULL),
-      d_quickXplain(options::bitvectorQuickXplain() ? new QuickXPlain("bb", d_quickCheck) :  NULL),
+      d_quickCheck(),
+      d_quickXplain(),
       d_statistics()
 {
+  if (options::bitvectorQuickXplain())
+  {
+    d_quickCheck.reset(new BVQuickCheck("bb", bv));
+    d_quickXplain.reset(new QuickXPlain("bb", d_quickCheck.get()));
+  }
 }
 
 BitblastSolverCms::~BitblastSolverCms() {}
@@ -92,7 +98,7 @@ bool BitblastSolverCms::check(Theory::Effort e)
     }
 
     //    std::cout << "  fact: " << fact << std::endl;
-    if (d_assertions.find(fact) == d_assertions.end())
+    if (true || d_assertions.find(fact) == d_assertions.end())
     {
       //std::cout << "add assumption: " << fact << std::endl;
       d_bitblaster->bbFormula(fact, false);
@@ -142,6 +148,7 @@ Node BitblastSolverCms::getModelValue(TNode node)
 
 void BitblastSolverCms::setConflict()
 {
+  //std::cout << "conflict at " << d_context->getLevel() << std::endl;
   Node conflict;
   std::vector<Node> ucore = d_bitblaster->getUnsatAssumptions();
   std::vector<Node> conflictAtoms;
