@@ -512,6 +512,8 @@ libcvc4_add_sources(
   theory/quantifiers/fun_def_evaluator.h
   theory/quantifiers/fun_def_process.cpp
   theory/quantifiers/fun_def_process.h
+  theory/quantifiers/inst_arrays_eqrange.cpp
+  theory/quantifiers/inst_arrays_eqrange.h
   theory/quantifiers/inst_match.cpp
   theory/quantifiers/inst_match.h
   theory/quantifiers/inst_match_trie.cpp

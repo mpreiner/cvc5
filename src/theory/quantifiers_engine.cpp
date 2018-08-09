@@ -14,6 +14,7 @@
 
 #include "theory/quantifiers_engine.h"
 
+#include "options/arrays_options.h"
 #include "options/quantifiers_options.h"
 #include "options/uf_options.h"
 #include "smt/smt_statistics_registry.h"
@@ -24,6 +25,7 @@
 #include "theory/quantifiers/fmf/bounded_integers.h"
 #include "theory/quantifiers/fmf/full_model_check.h"
 #include "theory/quantifiers/fmf/model_engine.h"
+#include "theory/quantifiers/inst_arrays_eqrange.h"
 #include "theory/quantifiers/inst_strategy_enumerative.h"
 #include "theory/quantifiers/quant_conflict_find.h"
 #include "theory/quantifiers/quant_split.h"
@@ -49,6 +51,7 @@ class QuantifiersEnginePrivate
         d_model_engine(nullptr),
         d_bint(nullptr),
         d_qcf(nullptr),
+        d_eqrange(nullptr),
         d_sg_gen(nullptr),
         d_synth_e(nullptr),
         d_fs(nullptr),
@@ -73,6 +76,8 @@ class QuantifiersEnginePrivate
   std::unique_ptr<quantifiers::BoundedIntegers> d_bint;
   /** Conflict find mechanism for quantifiers */
   std::unique_ptr<quantifiers::QuantConflictFind> d_qcf;
+  /** Arrays equality range through instantitaion */
+  std::unique_ptr<quantifiers::InstArraysEqrange> d_eqrange;
   /** subgoal generator */
   std::unique_ptr<quantifiers::ConjectureGenerator> d_sg_gen;
   /** ceg instantiation */
@@ -158,6 +163,12 @@ class QuantifiersEnginePrivate
       d_rel_dom.reset(new quantifiers::RelevantDomain(qe));
       d_fs.reset(new quantifiers::InstStrategyEnum(qe, d_rel_dom.get()));
       modules.push_back(d_fs.get());
+    }
+    if (options::arraysEqrangeAsQuant())
+    {
+      d_eqrange.reset(new quantifiers::InstArraysEqrange(qe));
+      modules.push_back(d_eqrange.get());
+      needsBuilder = true;
     }
   }
 };
