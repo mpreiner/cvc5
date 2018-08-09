@@ -1434,11 +1434,8 @@ void TheoryArrays::check(Effort e) {
           }
         }
         break;
-    case kind::EQ_RANGE:
-      break;
-    default:
-      Unreachable();
-      break;
+      case kind::EQ_RANGE: break;
+      default: Unreachable(); break;
     }
   }
 
