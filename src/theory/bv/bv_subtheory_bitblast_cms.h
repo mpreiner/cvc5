@@ -52,8 +52,7 @@ class BitblastSolverCms : public SubtheorySolver
 
   context::Context* d_context;
   context::CDList<Node> d_assumptions;
-  context::CDHashSet<Node, NodeHashFunction> d_assertions;
-  context::CDList<Node> d_assertionsAdded;
+  context::CDList<Node> d_assertions;
   context::CDQueue<TNode> d_bitblastQueue;
   std::unique_ptr<BVQuickCheck> d_quickCheck;
   std::unique_ptr<QuickXPlain> d_quickXplain;

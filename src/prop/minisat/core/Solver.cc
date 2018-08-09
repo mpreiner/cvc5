@@ -925,7 +925,9 @@ void Solver::uncheckedEnqueue(Lit p, CRef from)
     trail.push_(p);
     if (theory[var(p)]) {
       // Enqueue to the theory
-      proxy->enqueueTheoryLiteral(MinisatSatSolver::toSatLiteral(p));
+//      std::cout << "[" << decisionLevel() << ", " << assertionLevel << "] enqueue: " << proxy->getNode(MinisatSatSolver::toSatLiteral(p)) << std::endl;
+      bool isTopLevel = (decisionLevel() + assertionLevel) == 0;
+      proxy->enqueueTheoryLiteral(MinisatSatSolver::toSatLiteral(p), isTopLevel);
     }
 }
 

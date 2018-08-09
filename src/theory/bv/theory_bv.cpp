@@ -103,6 +103,7 @@ TheoryBV::TheoryBV(context::Context* c,
 
   if (options::bvSatSolver() == bv::SAT_SOLVER_CRYPTOMINISAT
       && !options::proof())
+//  if (!options::proof())
   {
     BitblastSolverCms* bb_solver = new BitblastSolverCms(c, this);
     d_subtheories.emplace_back(bb_solver);

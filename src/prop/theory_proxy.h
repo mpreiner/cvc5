@@ -68,7 +68,7 @@ public:
 
   void theoryPropagate(SatClause& output);
 
-  void enqueueTheoryLiteral(const SatLiteral& l);
+  void enqueueTheoryLiteral(const SatLiteral& l, bool isTopLevel);
 
   SatLiteral getNextTheoryDecisionRequest();
 

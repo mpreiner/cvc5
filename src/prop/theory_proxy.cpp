@@ -130,11 +130,18 @@ void TheoryProxy::explainPropagation(SatLiteral l, SatClause& explanation) {
   }
 }
 
-void TheoryProxy::enqueueTheoryLiteral(const SatLiteral& l) {
+void TheoryProxy::enqueueTheoryLiteral(const SatLiteral& l, bool isTopLevel)
+{
+  SatTopLevelAttribute attrib;
   Node literalNode = d_cnfStream->getNode(l);
   Debug("prop") << "enqueueing theory literal " << l << " " << literalNode << std::endl;
   Assert(!literalNode.isNull());
   //std::cout << d_cnfStream->d_satSolver->getAssertionLevel() << " enqueue: " << literalNode << std::endl;
+  if (isTopLevel)
+  {
+    literalNode.setAttribute(attrib, true);
+    //std::cout << "top level: " << literalNode << std::endl;
+  }
   d_queue.push(literalNode);
 }
 

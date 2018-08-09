@@ -25,6 +25,7 @@
 
 #include "context/cdlist.h"
 #include "context/context.h"
+#include "expr/attribute.h"
 #include "expr/node.h"
 #include "proof/clause_id.h"
 #include "prop/sat_solver_types.h"
@@ -35,6 +36,9 @@ namespace CVC4 {
 class BitVectorProof;
 
 namespace prop {
+
+struct SatTopLevelAttributeId {};
+using SatTopLevelAttribute = expr::Attribute<SatTopLevelAttributeId, bool>;
 
 class TheoryProxy;
 
