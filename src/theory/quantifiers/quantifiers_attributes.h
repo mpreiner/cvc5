@@ -88,6 +88,12 @@ struct SygusVarToTermAttributeId
 typedef expr::Attribute<SygusVarToTermAttributeId, Node>
     SygusVarToTermAttribute;
 
+/** Attribute true for quantifiers that are array equality range */
+struct EqrangeAttributeId
+{
+};
+typedef expr::Attribute<EqrangeAttributeId, bool> EqrangeAttribute;
+
 namespace quantifiers {
 
 /** Attribute priority for rewrite rules */
@@ -116,6 +122,8 @@ struct QAttributes
   bool d_sygus;
   /** side condition for sygus conjectures */
   Node d_sygusSideCondition;
+  /** is this formula marked as an array equality range? */
+  bool d_eqrange;
   /** stores the maximum instantiation level allowed for this quantified formula
    * (-1 means allow any) */
   int d_qinstLevel;
@@ -190,6 +198,8 @@ public:
   bool isFunDef( Node q );
   /** is sygus conjecture */
   bool isSygus( Node q );
+  /** is array equality range */
+  bool isEqrange(Node q);
   /** get instantiation level */
   int getQuantInstLevel( Node q );
   /** get rewrite rule priority */
