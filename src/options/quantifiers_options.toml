@@ -1975,11 +1975,19 @@ header = "options/quantifiers_options.h"
   help       = "track instantiation lemmas (for proofs, unsat cores, qe and synthesis minimization)"
 
 [[option]]
+  name       = "arraysEqrangeAsQuant"
+  category   = "regular"
+  long       = "arrays-equality-range-as-quantifiers"
+  type       = "bool"
+  default    = "true"
+  help       = "rewrites array equality range as quantifiers"
+
+[[option]]
   name       = "dedicatedEqrangeQuant"
   category   = "regular"
   long       = "dedicated-eqrange-quant"
   type       = "bool"
-  default    = "true"
+  default    = "false"
   help       = "use dedicated module to handle arrays equality range quantifiers"
 
 [[option]]
