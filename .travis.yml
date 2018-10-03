@@ -102,6 +102,8 @@ matrix:
       env: TRAVIS_CVC4_CONFIG='production --language-bindings=java,python --lfsc'
     - compiler: gcc
       env: TRAVIS_CVC4_CONFIG='debug --lfsc --no-debug-symbols'
+    - compiler: gcc
+      env: TRAVIS_CVC4_CONFIG='production --static'
 
     # Add autotools build until cmake is the default
     - compiler: gcc
@@ -110,8 +112,6 @@ matrix:
     # Test with Clang
     - compiler: clang
       env: TRAVIS_CVC4_CONFIG='debug --cln --gpl --no-debug-symbols --no-proofs'
-    - compiler: gcc
-      env: TRAVIS_CVC4_CONFIG='production --static'
 notifications:
   email:
     on_success: change
