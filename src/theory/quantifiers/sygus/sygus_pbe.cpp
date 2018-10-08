@@ -179,6 +179,7 @@ bool SygusPbe::initialize(Node n,
       return false;
     }
   }
+  bool isVarAgnostic = options::sygusEnumVarAgnostic();
   for (const Node& c : candidates)
   {
     Assert(d_examples.find(c) != d_examples.end());
@@ -202,7 +203,7 @@ bool SygusPbe::initialize(Node n,
     for (const Node& e : d_candidate_to_enum[c])
     {
       TypeNode etn = e.getType();
-      d_tds->registerEnumerator(e, c, d_parent, true);
+      d_tds->registerEnumerator(e, c, d_parent, true, false, isVarAgnostic);
       Node g = d_tds->getActiveGuardForEnumerator(e);
       d_enum_to_active_guard[e] = g;
       d_enum_to_candidate[e] = c;
@@ -357,12 +358,18 @@ Node SygusPbe::addSearchVal(TypeNode tn, Node e, Node bvr)
 {
   Assert(isPbe());
   Assert(!e.isNull());
-  e = d_tds->getSynthFunForEnumerator(e);
+  if (!d_tds->isPassiveEnumerator(e))
+  {
+    // we cannot apply conjecture-specific symmetry breaking on enumerators that
+    // are not passive
+    return Node::null();
+  }
+  Node ee = d_tds->getSynthFunForEnumerator(e);
   Assert(!e.isNull());
-  std::map<Node, bool>::iterator itx = d_examples_invalid.find(e);
+  std::map<Node, bool>::iterator itx = d_examples_invalid.find(ee);
   if (itx == d_examples_invalid.end()) {
-    unsigned nex = d_examples[e].size();
-    Node ret = d_pbe_trie[e][tn].addPbeExample(tn, e, bvr, this, 0, nex);
+    unsigned nex = d_examples[ee].size();
+    Node ret = d_pbe_trie[e][tn].addPbeExample(tn, ee, bvr, this, 0, nex);
     Assert(ret.getType() == bvr.getType());
     return ret;
   }
