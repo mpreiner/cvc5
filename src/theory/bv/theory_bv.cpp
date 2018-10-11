@@ -114,7 +114,7 @@ TheoryBV::TheoryBV(context::Context* c,
     BitblastSolver* bb_solver = new BitblastSolver(c, this);
     if (options::bvAbstraction())
     {
-      bb_solver->setAbstraction(d_abstractionModule);
+      bb_solver->setAbstraction(d_abstractionModule.get());
     }
     d_subtheories.emplace_back(bb_solver);
     d_subtheoryMap[SUB_BITBLAST] = bb_solver;

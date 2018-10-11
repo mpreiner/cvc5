@@ -26,8 +26,8 @@ namespace bv {
 
 BitblastSolverCms::BitblastSolverCms(context::Context* c, TheoryBV* bv)
     : SubtheorySolver(c, bv),
-      d_context(c),
       d_bitblaster(new EagerBitblaster(bv, c, SAT_SOLVER_CRYPTOMINISAT)),
+      d_context(c),
       d_assumptions(c),
       d_assertions(c),
       d_bitblastQueue(c),
