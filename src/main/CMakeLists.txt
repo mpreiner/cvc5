@@ -57,9 +57,11 @@ endif()
 #   https://cmake.org/cmake/help/v3.0/prop_tgt/LINK_SEARCH_START_STATIC.html
 #   https://cmake.org/cmake/help/v3.0/prop_tgt/LINK_SEARCH_END_STATIC.html
 if(NOT ENABLE_SHARED)
-  set_target_properties(cvc4-bin PROPERTIES LINK_FLAGS -static)
-  set_target_properties(cvc4-bin PROPERTIES LINK_SEARCH_START_STATIC ON)
-  set_target_properties(cvc4-bin PROPERTIES LINK_SEARCH_END_STATIC ON)
+  set_target_properties(cvc4-bin
+    PROPERTIES
+      LINK_FLAGS "-static -Wl,--no-export-dynamic"
+      LINK_SEARCH_START_STATIC ON
+      LINK_SEARCH_END_STATIC ON)
 endif()
 
 if(ENABLE_PORTFOLIO)
@@ -89,9 +91,11 @@ if(ENABLE_PORTFOLIO)
   endif()
 
   if(NOT ENABLE_SHARED)
-    set_target_properties(pcvc4-bin PROPERTIES LINK_FLAGS -static)
-    set_target_properties(pcvc4-bin PROPERTIES LINK_SEARCH_START_STATIC ON)
-    set_target_properties(pcvc4-bin PROPERTIES LINK_SEARCH_END_STATIC ON)
+    set_target_properties(pcvc4-bin
+    PROPERTIES
+      LINK_FLAGS "-static -Wl,--no-export-dynamic"
+      LINK_SEARCH_START_STATIC ON
+      LINK_SEARCH_END_STATIC ON)
   endif()
 endif()
 
