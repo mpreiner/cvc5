@@ -284,7 +284,7 @@ header = "options/smt_options.h"
   category   = "regular"
   long       = "ext-rew-prep-bv"
   type       = "bool"
-  default    = "true"
+  default    = "false"
   help       = "use extended rewriter as a preprocessing pass for BV"
 
 [[option]]
