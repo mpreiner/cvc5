@@ -3642,6 +3642,65 @@ void ExtendedRewriter::debugExtendedRewrite(Node n,
   }
 }
 
+void ExtendedRewriter::configure(std::string rules)
+{
+  if (rules.length() == 0)
+  {
+    return;
+  }
+  disableAll();
+  std::unordered_map<std::string, ExtRule> rule_map;
+  rule_map.emplace("rule_1_4_16_20_21", ext_bv_rule_1_4_16_20_21);
+  rule_map.emplace("rule_2_3", ext_bv_rule_2_3);
+  rule_map.emplace("rule_5", ext_bv_rule_5);
+  rule_map.emplace("rule_6", ext_bv_rule_6);
+  rule_map.emplace("rule_7_19", ext_bv_rule_7_19);
+  rule_map.emplace("rule_8", ext_bv_rule_8);
+  rule_map.emplace("rule_9_10_18", ext_bv_rule_9_10_18);
+  rule_map.emplace("rule_11", ext_bv_rule_11);
+  rule_map.emplace("rule_12", ext_bv_rule_12);
+  rule_map.emplace("rule_13_14", ext_bv_rule_13_14);
+  rule_map.emplace("rule_15", ext_bv_rule_15);
+  rule_map.emplace("rule_23", ext_bv_rule_23);
+  rule_map.emplace("rule_25", ext_bv_rule_25);
+  rule_map.emplace("rule_26", ext_bv_rule_26);
+  rule_map.emplace("rule_27", ext_bv_rule_27);
+  rule_map.emplace("rule_28_29_30_31", ext_bv_rule_28_29_30_31);
+  rule_map.emplace("rule_32", ext_bv_rule_32);
+  rule_map.emplace("rule_33", ext_bv_rule_33);
+  rule_map.emplace("rule_34", ext_bv_rule_34);
+  rule_map.emplace("rule_35_36", ext_bv_rule_35_36);
+  rule_map.emplace("rule_37", ext_bv_rule_37);
+  rule_map.emplace("rule_38_39_40_41_42", ext_bv_rule_38_39_40_41_42);
+  rule_map.emplace("rule_43_45", ext_bv_rule_43_45);
+  rule_map.emplace("rule_44_46", ext_bv_rule_44_46);
+  rule_map.emplace("rule_47", ext_bv_rule_47);
+  rule_map.emplace("rule_48", ext_bv_rule_48);
+  rule_map.emplace("rule_49", ext_bv_rule_49);
+  rule_map.emplace("rule_50", ext_bv_rule_50);
+  rule_map.emplace("rule_51", ext_bv_rule_51);
+
+  std::string s = rules + ",";
+  size_t pos = 0;
+  std::string delim = ",";
+  std::string rule;
+  while ((pos = s.find(",")) != std::string::npos)
+  {
+    rule = s.substr(0, pos);
+    s.erase(0, pos + delim.length());
+    std::cout << rule << std::endl;
+    if (rule_map.find(rule) != rule_map.end())
+    {
+      enable(rule_map[rule]);
+      std::cout << "enable: " << rule << std::endl;
+    }
+    else
+    {
+      Unreachable("Invalid extended rewrite rule");
+    }
+  }
+}
+
 } /* CVC4::theory::quantifiers namespace */
 } /* CVC4::theory namespace */
 } /* CVC4 namespace */

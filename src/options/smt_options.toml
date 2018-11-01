@@ -304,6 +304,14 @@ header = "options/smt_options.h"
   help       = "use aggressive extended rewriter as a preprocessing pass"
 
 [[option]]
+  name       = "extRewBvRules"
+  category   = "regular"
+  long       = "ext-rew-bv-rules=RULES"
+  type       = "std::string"
+  default    = ""
+  help       = "enable/disable extended rewrite rules"
+
+[[option]]
   name       = "simplifyWithCareEnabled"
   category   = "regular"
   long       = "simp-with-care"

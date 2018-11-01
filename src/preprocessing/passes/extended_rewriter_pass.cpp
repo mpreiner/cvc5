@@ -94,6 +94,7 @@ PreprocessingPassResult ExtRewPre::applyInternal(
     AssertionPipeline* assertionsToPreprocess)
 {
   theory::quantifiers::ExtendedRewriter extr(options::extRewPrepAgg());
+  extr.configure(options::extRewBvRules());
   for (unsigned i = 0, size = assertionsToPreprocess->size(); i < size; ++i)
   {
     Node res;
