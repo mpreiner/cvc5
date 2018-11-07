@@ -3651,6 +3651,10 @@ void ExtendedRewriter::configure(std::string rules)
     return;
   }
   disableAll();
+  if (rules == "none")
+  {
+    return;
+  }
   std::unordered_map<std::string, ExtRule> rule_map;
   rule_map.emplace("rule_1_4_16_20_21", ext_bv_rule_1_4_16_20_21);
   rule_map.emplace("rule_2_3", ext_bv_rule_2_3);
