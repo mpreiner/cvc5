@@ -36,7 +36,7 @@ class TheoryModel;
 namespace bv {
 
 class TLazyBitblaster;
-class TheoryBV;
+class TheoryBVLazy;
 
 class BVQuickCheck {
   context::Context d_ctx;
@@ -46,65 +46,65 @@ class BVQuickCheck {
   void setConflict();
 
 public:
-  BVQuickCheck(const std::string& name, theory::bv::TheoryBV* bv);
-  ~BVQuickCheck();
-  bool inConflict();
-  Node getConflict() { return d_conflict; }
-  /** 
-   * Checks the satisfiability for a given set of assumptions.
-   * 
-   * @param assumptions literals assumed true
-   * @param budget max number of conflicts
-   * 
-   * @return 
-   */
-  prop::SatValue checkSat(std::vector<Node>& assumptions, unsigned long budget);
-  /** 
-   * Checks the satisfiability of given assertions.
-   * 
-   * @param budget max number of conflicts
-   * 
-   * @return 
-   */
-  prop::SatValue checkSat(unsigned long budget);
-  
-  /** 
-   * Convert to CNF and assert the given literal.
-   * 
-   * @param assumption bv literal
-   * 
-   * @return false if a conflict has been found via bcp.
-   */
-  bool addAssertion(TNode assumption);
+ BVQuickCheck(const std::string& name, theory::bv::TheoryBVLazy* bv);
+ ~BVQuickCheck();
+ bool inConflict();
+ Node getConflict() { return d_conflict; }
+ /**
+  * Checks the satisfiability for a given set of assumptions.
+  *
+  * @param assumptions literals assumed true
+  * @param budget max number of conflicts
+  *
+  * @return
+  */
+ prop::SatValue checkSat(std::vector<Node>& assumptions, unsigned long budget);
+ /**
+  * Checks the satisfiability of given assertions.
+  *
+  * @param budget max number of conflicts
+  *
+  * @return
+  */
+ prop::SatValue checkSat(unsigned long budget);
 
-  void push();
-  void pop();
-  void popToZero();
-  /** 
-   * Deletes the SAT solver and CNF stream, but maintains the
-   * bit-blasting term cache. 
-   * 
-   */
-  void clearSolver(); 
+ /**
+  * Convert to CNF and assert the given literal.
+  *
+  * @param assumption bv literal
+  *
+  * @return false if a conflict has been found via bcp.
+  */
+ bool addAssertion(TNode assumption);
 
-  /** 
-   * Computes the size of the circuit required to bit-blast
-   * atom, by not recounting the nodes in seen. 
-   * 
-   * @param node 
-   * @param seen 
-   * 
-   * @return 
-   */
-  uint64_t computeAtomWeight(TNode atom, NodeSet& seen);
-  bool collectModelInfo(theory::TheoryModel* model, bool fullModel);
+ void push();
+ void pop();
+ void popToZero();
+ /**
+  * Deletes the SAT solver and CNF stream, but maintains the
+  * bit-blasting term cache.
+  *
+  */
+ void clearSolver();
 
-  typedef std::unordered_set<TNode, TNodeHashFunction>::const_iterator vars_iterator;
-  vars_iterator beginVars(); 
-  vars_iterator endVars(); 
+ /**
+  * Computes the size of the circuit required to bit-blast
+  * atom, by not recounting the nodes in seen.
+  *
+  * @param node
+  * @param seen
+  *
+  * @return
+  */
+ uint64_t computeAtomWeight(TNode atom, NodeSet& seen);
+ bool collectModelInfo(theory::TheoryModel* model, bool fullModel);
 
-  Node getVarValue(TNode var, bool fullModel); 
+ typedef std::unordered_set<TNode, TNodeHashFunction>::const_iterator
+     vars_iterator;
+ vars_iterator beginVars();
+ vars_iterator endVars();
 
+ Node getVarValue(TNode var, bool fullModel);
 };
 
 

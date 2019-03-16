@@ -24,7 +24,7 @@
 
 #include "expr/node.h"
 #include "proof/resolution_bitvector_proof.h"
-#include "theory/bv/theory_bv.h"
+#include "theory/bv/theory_bv_lazy.h"
 #include "theory/theory_model.h"
 
 namespace CVC4 {
@@ -39,7 +39,7 @@ class AigBitblaster;
  */
 class EagerBitblastSolver {
  public:
-  EagerBitblastSolver(context::Context* c, theory::bv::TheoryBV* bv);
+  EagerBitblastSolver(context::Context* c, theory::bv::TheoryBVLazy* bv);
   ~EagerBitblastSolver();
   bool checkSat();
   void assertFormula(TNode formula);
@@ -60,7 +60,7 @@ class EagerBitblastSolver {
   std::unique_ptr<AigBitblaster> d_aigBitblaster;
   bool d_useAig;
 
-  TheoryBV* d_bv;
+  TheoryBVLazy* d_bv;
   proof::BitVectorProof* d_bvp;
 };  // class EagerBitblastSolver
 

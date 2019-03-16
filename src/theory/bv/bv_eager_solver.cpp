@@ -19,6 +19,7 @@
 #include "options/bv_options.h"
 #include "theory/bv/bitblast/aig_bitblaster.h"
 #include "theory/bv/bitblast/eager_bitblaster.h"
+#include "theory/bv/theory_bv_lazy.h"
 
 using namespace std;
 
@@ -26,7 +27,7 @@ namespace CVC4 {
 namespace theory {
 namespace bv {
 
-EagerBitblastSolver::EagerBitblastSolver(context::Context* c, TheoryBV* bv)
+EagerBitblastSolver::EagerBitblastSolver(context::Context* c, TheoryBVLazy* bv)
     : d_assertionSet(c),
       d_assumptionSet(c),
       d_context(c),

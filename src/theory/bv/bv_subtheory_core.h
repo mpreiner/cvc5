@@ -31,6 +31,7 @@ namespace bv {
 
 class Slicer;
 class Base;
+
 /**
  * Bitvector equality solver
  */
@@ -101,19 +102,19 @@ class CoreSolver : public SubtheorySolver {
   bool isCompleteForTerm(TNode term, TNodeBoolMap& seen);
   Statistics d_statistics;
 public:
-  CoreSolver(context::Context* c, TheoryBV* bv);
-  ~CoreSolver();
-  bool isComplete() override { return d_isComplete; }
-  void  setMasterEqualityEngine(eq::EqualityEngine* eq);
-  void preRegister(TNode node) override;
-  bool check(Theory::Effort e) override;
-  void explain(TNode literal, std::vector<TNode>& assumptions) override;
-  bool collectModelInfo(TheoryModel* m, bool fullModel) override;
-  Node getModelValue(TNode var) override;
-  void addSharedTerm(TNode t) override
-  {
-    d_equalityEngine.addTriggerTerm(t, THEORY_BV);
-  }
+ CoreSolver(context::Context* c, TheoryBVLazy* bv);
+ ~CoreSolver();
+ bool isComplete() override { return d_isComplete; }
+ void setMasterEqualityEngine(eq::EqualityEngine* eq);
+ void preRegister(TNode node) override;
+ bool check(Theory::Effort e) override;
+ void explain(TNode literal, std::vector<TNode>& assumptions) override;
+ bool collectModelInfo(TheoryModel* m, bool fullModel) override;
+ Node getModelValue(TNode var) override;
+ void addSharedTerm(TNode t) override
+ {
+   d_equalityEngine.addTriggerTerm(t, THEORY_BV);
+ }
   EqualityStatus getEqualityStatus(TNode a, TNode b) override
   {
     if (d_equalityEngine.areEqual(a, b)) {

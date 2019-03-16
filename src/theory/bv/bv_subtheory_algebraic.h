@@ -221,15 +221,15 @@ class AlgebraicSolver : public SubtheorySolver {
   bool quickCheck(std::vector<Node>& facts);
 
 public:
-  AlgebraicSolver(context::Context* c, TheoryBV* bv);
-  ~AlgebraicSolver();
+ AlgebraicSolver(context::Context* c, TheoryBVLazy* bv);
+ ~AlgebraicSolver();
 
-  void preRegister(TNode node) override {}
-  bool check(Theory::Effort e) override;
-  void explain(TNode literal, std::vector<TNode>& assumptions) override
-  {
-    Unreachable("AlgebraicSolver does not propagate.\n");
-  }
+ void preRegister(TNode node) override {}
+ bool check(Theory::Effort e) override;
+ void explain(TNode literal, std::vector<TNode>& assumptions) override
+ {
+   Unreachable("AlgebraicSolver does not propagate.\n");
+ }
   EqualityStatus getEqualityStatus(TNode a, TNode b) override;
   bool collectModelInfo(TheoryModel* m, bool fullModel) override;
   Node getModelValue(TNode node) override;

@@ -59,7 +59,7 @@ inline std::ostream& operator<<(std::ostream& out, SubTheory subtheory) {
 }
 
 // forward declaration
-class TheoryBV;
+class TheoryBVLazy;
 
 using AssertionQueue = context::CDQueue<Node>;
 
@@ -69,12 +69,14 @@ using AssertionQueue = context::CDQueue<Node>;
  */
 class SubtheorySolver {
  public:
-  SubtheorySolver(context::Context* c, TheoryBV* bv)
+  SubtheorySolver(context::Context* c, TheoryBVLazy* bv)
       : d_context(c),
         d_bv(bv),
         d_bvp(nullptr),
         d_assertionQueue(c),
-        d_assertionIndex(c, 0) {}
+        d_assertionIndex(c, 0)
+  {
+  }
   virtual ~SubtheorySolver() {}
   virtual bool check(Theory::Effort e) = 0;
   virtual void explain(TNode literal, std::vector<TNode>& assumptions) = 0;
@@ -106,7 +108,7 @@ class SubtheorySolver {
   context::Context* d_context;
 
   /** The bit-vector theory */
-  TheoryBV* d_bv;
+  TheoryBVLazy* d_bv;
   /** proof log */
   proof::ResolutionBitVectorProof* d_bvp;
   AssertionQueue d_assertionQueue;

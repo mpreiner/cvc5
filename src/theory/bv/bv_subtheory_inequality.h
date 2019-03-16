@@ -58,15 +58,16 @@ class InequalitySolver : public SubtheorySolver
   bool addInequality(TNode a, TNode b, bool strict, TNode fact);
   Statistics d_statistics;
 public:
-  InequalitySolver(context::Context* c, context::Context* u, TheoryBV* bv)
-    : SubtheorySolver(c, bv),
-      d_assertionSet(c),
-      d_inequalityGraph(c, u),
-      d_explanations(c),
-      d_isComplete(c, true),
-      d_ineqTerms(),
-      d_statistics()
-  {}
+ InequalitySolver(context::Context* c, context::Context* u, TheoryBVLazy* bv)
+     : SubtheorySolver(c, bv),
+       d_assertionSet(c),
+       d_inequalityGraph(c, u),
+       d_explanations(c),
+       d_isComplete(c, true),
+       d_ineqTerms(),
+       d_statistics()
+ {
+ }
 
   bool check(Theory::Effort e) override;
   void propagate(Theory::Effort e) override;

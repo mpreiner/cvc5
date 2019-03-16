@@ -20,7 +20,7 @@
 #include "options/smt_options.h"
 #include "smt/smt_statistics_registry.h"
 #include "theory/bv/slicer.h"
-#include "theory/bv/theory_bv.h"
+#include "theory/bv/theory_bv_lazy.h"
 #include "theory/bv/theory_bv_utils.h"
 #include "theory/ext_theory.h"
 #include "theory/theory_model.h"
@@ -32,17 +32,17 @@ using namespace CVC4::theory;
 using namespace CVC4::theory::bv;
 using namespace CVC4::theory::bv::utils;
 
-CoreSolver::CoreSolver(context::Context* c, TheoryBV* bv)
-  : SubtheorySolver(c, bv),
-    d_notify(*this),
-    d_equalityEngine(d_notify, c, "theory::bv::ee", true),
-    d_slicer(new Slicer()),
-    d_isComplete(c, true),
-    d_lemmaThreshold(16),
-    d_useSlicer(false),
-    d_preregisterCalled(false),
-    d_checkCalled(false),
-    d_reasons(c)
+CoreSolver::CoreSolver(context::Context* c, TheoryBVLazy* bv)
+    : SubtheorySolver(c, bv),
+      d_notify(*this),
+      d_equalityEngine(d_notify, c, "theory::bv::ee", true),
+      d_slicer(new Slicer()),
+      d_isComplete(c, true),
+      d_lemmaThreshold(16),
+      d_useSlicer(false),
+      d_preregisterCalled(false),
+      d_checkCalled(false),
+      d_reasons(c)
 {
   // The kinds we are treating as function application in congruence
   d_equalityEngine.addFunctionKind(kind::BITVECTOR_CONCAT, true);
