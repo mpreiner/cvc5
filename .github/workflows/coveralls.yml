@@ -30,7 +30,7 @@ jobs:
     - name: Setup Dependencies
       if: steps.restore-deps.outputs.cache-hit != 'true'
       run: |
-        ./contrib/get-antlr3.4
+        ./contrib/get-antlr-3.4
         ./contrib/get-symfpu
         ./contrib/get-cadical
         ./contrib/get-cryptominisat
