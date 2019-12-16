@@ -22,7 +22,7 @@ jobs:
 
     - name: Restore Dependencies
       id: restore-deps
-      run: action/cache@v1
+      uses: action/cache@v1
       with:
         path: deps
         key: ${{ runner.os }}-deps-antlr-symfpu-cadical-cms-lfsc-${{ hashFiles('contrib/get-**.sh') }}
