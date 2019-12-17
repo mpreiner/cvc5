@@ -20,6 +20,7 @@ jobs:
           cmake \
           cxxtest \
           gcovr \
+          lcov \
           libantlr3c-dev \
           libcln-dev \
           libgmp-dev
@@ -50,7 +51,11 @@ jobs:
       run: ctest -j2 --output-on-failure -L regress0
       working-directory: build
 
+    - name: LCOV
+      run: lcov --capture --directory build --output-file lcov.info
+
     - name: Coveralls
       uses: coverallsapp/github-action@master
       with:
+        path-to-lcov: lcov.info
         github-token: ${{ secrets.COVERALLS_TOKEN }}
