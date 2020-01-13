@@ -48,7 +48,7 @@ jobs:
       working-directory: build
 
     - name: Run CTest
-      run: ctest -j2 --output-on-failure -L regress0
+      run: ctest -j2 --output-on-failure -L regress1
       working-directory: build
 
     - name: Collect coverage information
@@ -60,9 +60,3 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
         file: ./lcov.txt
         fail_ci_if_error: true
-
-#    - name: Coveralls
-#      uses: coverallsapp/github-action@master
-#      with:
-#        path-to-lcov: lcov.info
-#        github-token: ${{ secrets.COVERALLS_TOKEN }}
