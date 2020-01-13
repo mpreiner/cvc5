@@ -24,6 +24,7 @@ jobs:
           libantlr3c-dev \
           libcln-dev \
           libgmp-dev
+        pip install toml
 
     - name: Restore Dependencies
       id: restore-deps
