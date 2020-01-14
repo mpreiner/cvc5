@@ -60,7 +60,7 @@ jobs:
     - name: Configure
       run: |
         export PATH="/usr/lib/ccache/:$PATH"
-        ./configure.sh debug --coverage --lfsc --symfpu --cadical --cryptominisat
+        ./configure.sh debug --coverage --lfsc --symfpu --cadical --cryptominisat --unit-testing
 
     - name: Build
       run: make -j2
@@ -70,13 +70,13 @@ jobs:
       run: ccache -s
 
     - name: Run CTest
-      run: ctest -j2 --output-on-failure -L unit
+      run: make -j2 check ARGS='--output-on-failure -LE regress[1-4]' CVC4_REGRESSION_ARGS='--no-early-exit'
       working-directory: build
 
-    - name: Collect coverage information
+    - name: Collect Coverage Information
       run: lcov --capture --directory build --output-file lcov.txt
 
-    - name: Upload coverage to Codecov
+    - name: Upload Coverage to Codecov
       uses: codecov/codecov-action@v1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
