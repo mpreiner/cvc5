@@ -59,8 +59,7 @@ jobs:
 
     - name: Configure
       run: |
-        ls /usr/lib/ccache/
-        export PATH="/usr/lib/ccache/bin/:$PATH"
+        export PATH="/usr/lib/ccache/:$PATH"
         ./configure.sh debug --coverage --lfsc --symfpu --cadical --cryptominisat
 
     - name: Build
