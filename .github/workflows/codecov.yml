@@ -57,6 +57,7 @@ jobs:
         ccache -M 1G
         ccache -z
         export PATH="/usr/lib/ccache:$PATH"
+        echo "$PATH"
 
     - name: Configure
       run: ./configure.sh debug --coverage --lfsc --symfpu --cadical --cryptominisat
