@@ -56,8 +56,7 @@ jobs:
         ccache --set-config=compression_level=6
         ccache -M 1G
         ccache -z
-        export PATH="/usr/lib/ccache:$PATH"
-        echo "$PATH"
+        export PATH="/usr/lib/ccache/bin:$PATH"
 
     - name: Configure
       run: ./configure.sh debug --coverage --lfsc --symfpu --cadical --cryptominisat
