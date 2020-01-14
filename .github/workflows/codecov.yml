@@ -41,6 +41,22 @@ jobs:
         ./contrib/get-cryptominisat
         ./contrib/get-lfsc-checker
 
+    - name: Initialize Compiler Cache
+      id: cache
+      uses: actions/cache@v1
+      with:
+        path: ccache-dir
+        key: cache-${{ runner.os }}-codecov-${{ github.branch }}
+        restore-keys: cache-${{ runner.os }}-codecov-
+
+    - name: Configure ccache
+      run: |
+        ccache --set-config=cache_dir=${{ github.workspace }}/ccache-dir
+        ccache --set-config=compression=true
+        ccache --set-config=compression_level=6
+        ccache -M 1G
+        ccache -z
+
     - name: Configure
       run: ./configure.sh debug --coverage --lfsc --symfpu --cadical --cryptominisat
 
@@ -48,8 +64,11 @@ jobs:
       run: make -j2
       working-directory: build
 
+    - name: ccache Statistics
+      run: ccache -s
+
     - name: Run CTest
-      run: ctest -j2 --output-on-failure -L regress1
+      run: ctest -j2 --output-on-failure -L unit
       working-directory: build
 
     - name: Collect coverage information
