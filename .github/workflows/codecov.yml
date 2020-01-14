@@ -46,7 +46,7 @@ jobs:
       uses: actions/cache@v1
       with:
         path: ccache-dir
-        key: cache-${{ runner.os }}-codecov-${{ github.branch }}
+        key: cache-${{ runner.os }}-codecov-${{ github.ref }}
         restore-keys: cache-${{ runner.os }}-codecov-
 
     - name: Configure ccache
@@ -56,6 +56,7 @@ jobs:
         ccache --set-config=compression_level=6
         ccache -M 1G
         ccache -z
+        export PATH="/usr/lib/ccache:$PATH"
 
     - name: Configure
       run: ./configure.sh debug --coverage --lfsc --symfpu --cadical --cryptominisat
