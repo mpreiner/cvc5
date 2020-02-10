@@ -59,7 +59,7 @@ jobs:
         ccache --set-config=cache_dir=${{ github.workspace }}/ccache-dir
         ccache --set-config=compression=true
         ccache --set-config=compression_level=6
-        ccache -M 1G
+        ccache -M 500M
         ccache -z
 
     - name: Configure
