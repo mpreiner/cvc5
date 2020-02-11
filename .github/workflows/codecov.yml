@@ -46,7 +46,7 @@ jobs:
     # in an initial cache miss. However, restore-keys will search for the most
     # recent cache with prefix cache-${{ runner.os }}-codecov-, and if found
     # uses it as a base for the new cache.
-    - name: Initialize Compiler Cache
+    - name: Restore ccache
       id: cache
       uses: actions/cache@v1
       with:
