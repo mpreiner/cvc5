@@ -75,7 +75,7 @@ jobs:
       run: ccache -s
 
     - name: Run CTest
-      run: make -j2 check ARGS='--output-on-failure -LE regress[1-4]' CVC4_REGRESSION_ARGS='--no-early-exit'
+      run: TEST_TIMEOUT=1 make -j2 check ARGS='--output-on-failure -LE regress[1-4]' CVC4_REGRESSION_ARGS='--no-early-exit'
       working-directory: build
 
     - name: Collect Coverage Information
