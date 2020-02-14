@@ -1291,7 +1291,7 @@ void SmtEngine::setDefaults() {
   if (!d_isInternalSubsolver)
   {
     if (options::produceAbducts() || options::sygusInference()
-        || options::sygusRewSynthInput())
+        || options::sygusRewSynthInput() || options::sygusInstDt())
     {
       // since we are trying to recast as sygus, we assume the input is sygus
       is_sygus = true;
