@@ -71,15 +71,8 @@ jobs:
         python3 -m pip install setuptools
         echo "::add-path::/usr/local/opt/ccache/libexec"
 
-    # Note: We install Cython with sudo since cmake can't find Cython otherwise.
-    - name: Install Cython
-      if: matrix.python-bindings && runner.os == 'Linux'
-      run: |
-        sudo python3 -m pip install \
-          Cython==0.29 --install-option="--no-cython-compile"
-
     - name: Install Cython (macOS)
-      if: matrix.python-bindings && runner.os == 'macOS'
+      if: matrix.python-bindings
       run: |
         python3 -m pip install \
           Cython==0.29 --install-option="--no-cython-compile"
