@@ -57,8 +57,6 @@ libcvc4_add_sources(
   preprocessing/passes/bv_to_int.cpp
   preprocessing/passes/bv_to_int.h
   preprocessing/passes/eqrange_to_quant.cpp
-  preprocessing/passes/eqrange_to_quant.cpp
-  preprocessing/passes/eqrange_to_quant.h
   preprocessing/passes/eqrange_to_quant.h
   preprocessing/passes/extended_rewriter_pass.cpp
   preprocessing/passes/extended_rewriter_pass.h
