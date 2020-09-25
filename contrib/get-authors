@@ -13,10 +13,9 @@ gituser="`git config user.name` <`git config user.email`>"
 while [ $# -gt 0 ]; do
   f=$1
   shift
-  if ! grep -q " \*\* Top contributors" "$f"
+  header_lines=0
+  if grep -q " \*\* Top contributors" "$f"
   then
-    header_lines=0
-  else
     header_lines=$(grep "\*\*\/" "$f" -m 1 -n | cut -d ':' -f 1)
     if [ -z $header_lines ]; then header_lines=0; fi
   fi
