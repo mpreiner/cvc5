@@ -11,9 +11,11 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
 
-      - uses: jitterbit/get-changed-files@v1
-        run: |
-          contrib/update-copyright.pl ${{ steps.files.outputs.all }}
+      - id: files
+        uses: jitterbit/get-changed-files@v1
+
+      - name: Update headers
+        run: contrib/update-copyright.pl ${{ steps.files.outputs.all }}
 
       - uses: stefanzweifel/git-auto-commit-action@v4
         with:
