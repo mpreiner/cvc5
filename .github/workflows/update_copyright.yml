@@ -15,7 +15,8 @@ jobs:
         uses: jitterbit/get-changed-files@v1
 
       - name: Update headers
-        run: contrib/update-copyright.pl ${{ steps.files.outputs.all }}
+        run: |
+          contrib/update-copyright.pl ${{ steps.files.outputs.added_modified }}
 
       - uses: stefanzweifel/git-auto-commit-action@v4
         with:
