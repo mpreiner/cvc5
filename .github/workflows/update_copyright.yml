@@ -8,15 +8,11 @@ jobs:
 
     steps:
 
-      - name: output
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: echo "$GITHUB_CONTEXT"
-
       - uses: actions/checkout@v2
         with:
           fetch-depth: 0
-          ref: ${{ github.head_ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          #${{ github.head_ref }}
 
       - id: files
         uses: jitterbit/get-changed-files@v1
