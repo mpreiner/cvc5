@@ -9,9 +9,9 @@ jobs:
     steps:
 
       - name: output
-        run: |
-          echo "${{ github.head_ref }}"
-          echo "${{ github.base_ref }}"
+        env:
+         GITHUB_CONTEXT: ${{ toJson(github) }}
+         run: echo "$GITHUB_CONTEXT"
 
       - uses: actions/checkout@v2
         with:
