@@ -561,7 +561,8 @@ void CegGrammarConstructor::mkSygusDefaultGrammar(
         include_cons,
     std::unordered_set<Node, NodeHashFunction>& term_irrelevant,
     std::vector<SygusDatatypeGenerator>& sdts,
-    std::set<TypeNode>& unres)
+    std::set<TypeNode>& unres,
+    bool include_ite)
 {
   NodeManager* nm = NodeManager::currentNM();
   Trace("sygus-grammar-def") << "Construct default grammar for " << fun << " "
@@ -1043,14 +1044,17 @@ void CegGrammarConstructor::mkSygusDefaultGrammar(
       sdts[i].addConstructor(types[i].mkGroundTerm(), "", {});
     }
 
-    // always add ITE
-    Kind k = ITE;
-    Trace("sygus-grammar-def") << "...add for " << k << std::endl;
-    std::vector<TypeNode> cargsIte;
-    cargsIte.push_back(unres_bt);
-    cargsIte.push_back(unres_t);
-    cargsIte.push_back(unres_t);
-    sdts[i].addConstructor(k, cargsIte);
+    if (include_ite)
+    {
+      // always add ITE
+      Kind k = ITE;
+      Trace("sygus-grammar-def") << "...add for " << k << std::endl;
+      std::vector<TypeNode> cargsIte;
+      cargsIte.push_back(unres_bt);
+      cargsIte.push_back(unres_t);
+      cargsIte.push_back(unres_t);
+      sdts[i].addConstructor(k, cargsIte);
+    }
   }
   std::map<TypeNode, std::pair<unsigned, bool>>::iterator itgat;
   // initialize the datatypes (except for the last one, reserved for Bool)
@@ -1491,7 +1495,8 @@ TypeNode CegGrammarConstructor::mkSygusDefaultType(
         exclude_cons,
     std::map<TypeNode, std::unordered_set<Node, NodeHashFunction>>&
         include_cons,
-    std::unordered_set<Node, NodeHashFunction>& term_irrelevant)
+    std::unordered_set<Node, NodeHashFunction>& term_irrelevant,
+    bool include_ite)
 {
   Trace("sygus-grammar-def") << "*** Make sygus default type " << range << ", make datatypes..." << std::endl;
   for (std::map<TypeNode, std::unordered_set<Node, NodeHashFunction>>::iterator
@@ -1511,7 +1516,8 @@ TypeNode CegGrammarConstructor::mkSygusDefaultType(
                         include_cons,
                         term_irrelevant,
                         sdts,
-                        unres);
+                        unres,
+                        include_ite);
   // extract the datatypes from the sygus datatype generator objects
   std::vector<DType> datatypes;
   for (unsigned i = 0, ndts = sdts.size(); i < ndts; i++)

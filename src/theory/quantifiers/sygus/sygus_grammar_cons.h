@@ -116,7 +116,8 @@ public:
          exclude_cons,
      std::map<TypeNode, std::unordered_set<Node, NodeHashFunction>>&
          include_cons,
-     std::unordered_set<Node, NodeHashFunction>& term_irrelevant);
+     std::unordered_set<Node, NodeHashFunction>& term_irrelevant,
+     bool include_ite = true);
 
  /**
   * Make the default sygus datatype type corresponding to builtin type range.
@@ -252,7 +253,8 @@ public:
           include_cons,
       std::unordered_set<Node, NodeHashFunction>& term_irrelevant,
       std::vector<SygusDatatypeGenerator>& sdts,
-      std::set<TypeNode>& unres);
+      std::set<TypeNode>& unres,
+      bool include_ite = true);
 
   // helper function for mkSygusTemplateType
   static TypeNode mkSygusTemplateTypeRec(Node templ,

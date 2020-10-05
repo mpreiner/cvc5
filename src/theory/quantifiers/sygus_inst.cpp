@@ -389,7 +389,8 @@ void SygusInst::registerQuantifier(Node q)
                                                             extra_cons,
                                                             exclude_cons,
                                                             include_cons,
-                                                            term_irrelevant);
+                                                            term_irrelevant,
+                                                            false);
     types.push_back(tn);
 
     Trace("sygus-inst") << "Construct (default) datatype for " << var
