@@ -194,6 +194,19 @@ TrustNode TheoryBV::expandDefinition(Node node)
 void TheoryBV::preRegisterTerm(TNode node)
 {
   d_internal->preRegisterTerm(node);
+
+  eq::EqualityEngine* ee = getEqualityEngine();
+  if (ee)
+  {
+    if (node.getKind() == kind::EQUAL)
+    {
+      ee->addTriggerPredicate(node);
+    }
+    else
+    {
+      ee->addTerm(node);
+    }
+  }
 }
 
 bool TheoryBV::preCheck(Effort e) { return d_internal->preCheck(e); }

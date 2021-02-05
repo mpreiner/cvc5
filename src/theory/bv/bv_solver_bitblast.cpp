@@ -35,6 +35,7 @@ BVSolverBitblast::BVSolverBitblast(TheoryState* s,
       d_nullRegistrar(new prop::NullRegistrar()),
       d_nullContext(new context::Context()),
       d_facts(s->getSatContext()),
+      d_invalidateModelCache(s->getSatContext(), true),
       d_epg(pnm ? new EagerProofGenerator(pnm, s->getUserContext(), "")
                 : nullptr)
 {
@@ -82,6 +83,7 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
     node_map.emplace(lit, fact);
   }
 
+  d_invalidateModelCache.set(true);
   prop::SatValue val = d_satSolver->solve(assumptions);
 
   if (val == prop::SatValue::SAT_VALUE_FALSE)
@@ -118,7 +120,7 @@ bool BVSolverBitblast::collectModelValues(TheoryModel* m,
       continue;
     }
 
-    Node value = getValueFromSatSolver(term);
+    Node value = getValueFromSatSolver(term, true);
     Assert(value.isConst());
     if (!m->assertEquality(term, value, true))
     {
@@ -128,12 +130,28 @@ bool BVSolverBitblast::collectModelValues(TheoryModel* m,
   return true;
 }
 
-Node BVSolverBitblast::getValueFromSatSolver(TNode node)
+EqualityStatus BVSolverBitblast::getEqualityStatus(TNode a, TNode b)
 {
-  /* If node was not bit-blasted return zero-initialized bit-vector. */
+  Node value_a = getValue(a);
+  Node value_b = getValue(b);
+
+  if (value_a == value_b)
+  {
+    return EQUALITY_TRUE_IN_MODEL;
+  }
+  return EQUALITY_FALSE_IN_MODEL;
+}
+
+Node BVSolverBitblast::getValueFromSatSolver(TNode node, bool initialize)
+{
+  if (node.isConst())
+  {
+    return node;
+  }
+
   if (!d_bitblaster->hasBBTerm(node))
   {
-    return utils::mkConst(utils::getSize(node), 0u);
+    return initialize ? utils::mkConst(utils::getSize(node), 0u) : Node();
   }
 
   std::vector<Node> bits;
@@ -149,11 +167,82 @@ Node BVSolverBitblast::getValueFromSatSolver(TNode node)
     }
     else
     {
+      if (!initialize) return Node();
       bit = zero;
     }
     value = value * 2 + bit;
   }
   return utils::mkConst(bits.size(), value);
+}
+
+Node BVSolverBitblast::getValue(TNode node)
+{
+  if (d_invalidateModelCache.get())
+  {
+    d_modelCache.clear();
+  }
+  d_invalidateModelCache.set(false);
+
+  std::vector<TNode> visit;
+
+  TNode cur;
+  visit.push_back(node);
+  do
+  {
+    cur = visit.back();
+    visit.pop_back();
+
+    auto it = d_modelCache.find(cur);
+    if (it != d_modelCache.end() && !it->second.isNull())
+    {
+      continue;
+    }
+
+    if (d_bitblaster->hasBBTerm(cur))
+    {
+      Node value = getValueFromSatSolver(cur, false);
+      if (value.isConst())
+      {
+        d_modelCache[cur] = value;
+        continue;
+      }
+    }
+    if (Theory::isLeafOf(cur, theory::THEORY_BV))
+    {
+      Node value = getValueFromSatSolver(cur, true);
+      d_modelCache[cur] = value;
+      continue;
+    }
+
+    if (it == d_modelCache.end())
+    {
+      visit.push_back(cur);
+      d_modelCache.emplace(cur, Node());
+      visit.insert(visit.end(), cur.begin(), cur.end());
+    }
+    else if (it->second.isNull())
+    {
+      NodeBuilder<> nb(cur.getKind());
+      if (cur.getMetaKind() == kind::metakind::PARAMETERIZED)
+      {
+        nb << cur.getOperator();
+      }
+
+      std::unordered_map<Node, Node, NodeHashFunction>::iterator iit;
+      for (const TNode& child : cur)
+      {
+        iit = d_modelCache.find(child);
+        Assert(iit != d_modelCache.end());
+        Assert(iit->second.isConst());
+        nb << iit->second;
+      }
+      it->second = Rewriter::rewrite(nb.constructNode());
+    }
+  } while (!visit.empty());
+
+  auto it = d_modelCache.find(node);
+  Assert(it != d_modelCache.end());
+  return it->second;
 }
 
 }  // namespace bv
