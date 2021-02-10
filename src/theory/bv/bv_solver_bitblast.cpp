@@ -34,10 +34,15 @@ BVSolverBitblast::BVSolverBitblast(TheoryState* s,
       d_bitblaster(new BBSimple(s)),
       d_nullRegistrar(new prop::NullRegistrar()),
       d_nullContext(new context::Context()),
-      d_facts(s->getSatContext()),
+      d_bbFacts(s->getSatContext()),
+      d_assumptions(s->getSatContext()),
       d_invalidateModelCache(s->getSatContext(), true),
+      d_inSatMode(s->getSatContext(), false),
       d_epg(pnm ? new EagerProofGenerator(pnm, s->getUserContext(), "")
-                : nullptr)
+                : nullptr),
+      d_factLiteralCache(),
+      d_literalFactCache(),
+      d_propagate(options::bitvectorPropagate())
 {
   if (pnm != nullptr)
   {
@@ -65,26 +70,37 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
 {
   if (level != Theory::Effort::EFFORT_FULL)
   {
-    return;
+    /* Do propagation only if the SAT solver supports it. */
+    if (!d_propagate || !d_satSolver->setPropagateOnly())
+    {
+      return;
+    }
   }
 
-  std::vector<prop::SatLiteral> assumptions;
-  std::unordered_map<prop::SatLiteral, TNode, prop::SatLiteralHashFunction>
-      node_map;
-  for (const TNode fact : d_facts)
+  /* Process bit-blast queue and store SAT literals. */
+  while (!d_bbFacts.empty())
   {
-    /* Bitblast fact */
-    d_bitblaster->bbAtom(fact);
-    Node bb_fact = Rewriter::rewrite(d_bitblaster->getStoredBBAtom(fact));
-    d_cnfStream->ensureLiteral(bb_fact);
+    Node fact = d_bbFacts.front();
+    d_bbFacts.pop();
+    /* Bit-blast fact and cache literal. */
+    if (d_factLiteralCache.find(fact) == d_factLiteralCache.end())
+    {
+      d_bitblaster->bbAtom(fact);
+      Node bb_fact = Rewriter::rewrite(d_bitblaster->getStoredBBAtom(fact));
+      d_cnfStream->ensureLiteral(bb_fact);
 
-    prop::SatLiteral lit = d_cnfStream->getLiteral(bb_fact);
-    assumptions.push_back(lit);
-    node_map.emplace(lit, fact);
+      prop::SatLiteral lit = d_cnfStream->getLiteral(bb_fact);
+      d_factLiteralCache[fact] = lit;
+      d_literalFactCache[lit] = fact;
+    }
+    d_assumptions.push_back(d_factLiteralCache[fact]);
   }
 
   d_invalidateModelCache.set(true);
+  std::vector<prop::SatLiteral> assumptions(d_assumptions.begin(),
+                                            d_assumptions.end());
   prop::SatValue val = d_satSolver->solve(assumptions);
+  d_inSatMode = val == prop::SatValue::SAT_VALUE_TRUE;
 
   if (val == prop::SatValue::SAT_VALUE_FALSE)
   {
@@ -95,7 +111,7 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
     std::vector<Node> conflict;
     for (const prop::SatLiteral& lit : unsat_assumptions)
     {
-      conflict.push_back(node_map[lit]);
+      conflict.push_back(d_literalFactCache[lit]);
     }
 
     NodeManager* nm = NodeManager::currentNM();
@@ -106,8 +122,13 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
 bool BVSolverBitblast::preNotifyFact(
     TNode atom, bool pol, TNode fact, bool isPrereg, bool isInternal)
 {
-  d_facts.push_back(fact);
+  d_bbFacts.push_back(fact);
   return false;  // Return false to enable equality engine reasoning in Theory.
+}
+
+TrustNode BVSolverBitblast::explain(TNode n)
+{
+  return d_inferManager.explainLit(n);
 }
 
 bool BVSolverBitblast::collectModelValues(TheoryModel* m,
@@ -132,6 +153,10 @@ bool BVSolverBitblast::collectModelValues(TheoryModel* m,
 
 EqualityStatus BVSolverBitblast::getEqualityStatus(TNode a, TNode b)
 {
+  if (!d_inSatMode)
+  {
+    return EQUALITY_UNKNOWN;
+  }
   Node value_a = getValue(a);
   Node value_b = getValue(b);
 
