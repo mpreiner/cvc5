@@ -86,7 +86,7 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
     if (d_factLiteralCache.find(fact) == d_factLiteralCache.end())
     {
       d_bitblaster->bbAtom(fact);
-      Node bb_fact = Rewriter::rewrite(d_bitblaster->getStoredBBAtom(fact));
+      Node bb_fact = d_bitblaster->getStoredBBAtom(fact);
       d_cnfStream->ensureLiteral(bb_fact);
 
       prop::SatLiteral lit = d_cnfStream->getLiteral(bb_fact);
@@ -101,6 +101,7 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
                                             d_assumptions.end());
   prop::SatValue val = d_satSolver->solve(assumptions);
   d_inSatMode = val == prop::SatValue::SAT_VALUE_TRUE;
+  Debug("bv-bitblast") << "d_inSatMode: " << d_inSatMode << std::endl;
 
   if (val == prop::SatValue::SAT_VALUE_FALSE)
   {
@@ -112,6 +113,8 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
     for (const prop::SatLiteral& lit : unsat_assumptions)
     {
       conflict.push_back(d_literalFactCache[lit]);
+      Debug("bv-bitblast") << "unsat assumption (" << lit
+                           << "): " << d_literalFactCache[lit] << std::endl;
     }
 
     NodeManager* nm = NodeManager::currentNM();
@@ -126,7 +129,11 @@ bool BVSolverBitblast::preNotifyFact(
   return false;  // Return false to enable equality engine reasoning in Theory.
 }
 
-TrustNode BVSolverBitblast::explain(TNode n) { return d_im.explainLit(n); }
+TrustNode BVSolverBitblast::explain(TNode n)
+{
+  Debug("bv-bitblast") << "explain called on " << n << std::endl;
+  return d_im.explainLit(n);
+}
 
 bool BVSolverBitblast::collectModelValues(TheoryModel* m,
                                           const std::set<Node>& termSet)
@@ -150,8 +157,11 @@ bool BVSolverBitblast::collectModelValues(TheoryModel* m,
 
 EqualityStatus BVSolverBitblast::getEqualityStatus(TNode a, TNode b)
 {
+  Debug("bv-bitblast") << "getEqualityStatus on " << a << " and " << b
+                       << std::endl;
   if (!d_inSatMode)
   {
+    Debug("bv-bitblast") << EQUALITY_UNKNOWN << std::endl;
     return EQUALITY_UNKNOWN;
   }
   Node value_a = getValue(a);
@@ -159,8 +169,10 @@ EqualityStatus BVSolverBitblast::getEqualityStatus(TNode a, TNode b)
 
   if (value_a == value_b)
   {
+    Debug("bv-bitblast") << EQUALITY_TRUE_IN_MODEL << std::endl;
     return EQUALITY_TRUE_IN_MODEL;
   }
+  Debug("bv-bitblast") << EQUALITY_FALSE_IN_MODEL << std::endl;
   return EQUALITY_FALSE_IN_MODEL;
 }
 
