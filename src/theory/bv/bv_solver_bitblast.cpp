@@ -115,7 +115,7 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
     }
 
     NodeManager* nm = NodeManager::currentNM();
-    d_inferManager.conflict(nm->mkAnd(conflict), InferenceId::UNKNOWN);
+    d_im.conflict(nm->mkAnd(conflict), InferenceId::UNKNOWN);
   }
 }
 
@@ -126,10 +126,7 @@ bool BVSolverBitblast::preNotifyFact(
   return false;  // Return false to enable equality engine reasoning in Theory.
 }
 
-TrustNode BVSolverBitblast::explain(TNode n)
-{
-  return d_inferManager.explainLit(n);
-}
+TrustNode BVSolverBitblast::explain(TNode n) { return d_im.explainLit(n); }
 
 bool BVSolverBitblast::collectModelValues(TheoryModel* m,
                                           const std::set<Node>& termSet)
