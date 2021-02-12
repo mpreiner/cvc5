@@ -111,11 +111,11 @@ class BVSolverBitblast : public BVSolver
   BVProofRuleChecker d_bvProofChecker;
 
   /** Stores the SatLiteral for a given fact. */
-  std::unordered_map<Node, prop::SatLiteral, NodeHashFunction>
+  context::CDHashMap<Node, prop::SatLiteral, NodeHashFunction>
       d_factLiteralCache;
 
   /** Reverse map of d_factLiteralCache. */
-  std::unordered_map<prop::SatLiteral, Node, prop::SatLiteralHashFunction>
+  context::CDHashMap<prop::SatLiteral, Node, prop::SatLiteralHashFunction>
       d_literalFactCache;
 
   /** Option to enable/disable propagation for all effort levels != FULL. */

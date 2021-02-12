@@ -40,8 +40,8 @@ BVSolverBitblast::BVSolverBitblast(TheoryState* s,
       d_inSatMode(s->getSatContext(), false),
       d_epg(pnm ? new EagerProofGenerator(pnm, s->getUserContext(), "")
                 : nullptr),
-      d_factLiteralCache(),
-      d_literalFactCache(),
+      d_factLiteralCache(s->getSatContext()),
+      d_literalFactCache(s->getSatContext()),
       d_propagate(options::bitvectorPropagate())
 {
   if (pnm != nullptr)
@@ -114,7 +114,7 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
     {
       conflict.push_back(d_literalFactCache[lit]);
       Debug("bv-bitblast") << "unsat assumption (" << lit
-                           << "): " << d_literalFactCache[lit] << std::endl;
+                           << "): " << conflict.back() << std::endl;
     }
 
     NodeManager* nm = NodeManager::currentNM();
