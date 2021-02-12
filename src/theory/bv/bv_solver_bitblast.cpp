@@ -70,7 +70,7 @@ void BVSolverBitblast::postCheck(Theory::Effort level)
 {
   if (level != Theory::Effort::EFFORT_FULL)
   {
-    /* Do propagation only if the SAT solver supports it. */
+    /* Do bit-level propagation only if the SAT solver supports it. */
     if (!d_propagate || !d_satSolver->setPropagateOnly())
     {
       return;
