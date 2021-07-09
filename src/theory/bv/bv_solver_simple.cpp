@@ -149,6 +149,126 @@ bool BVSolverSimple::preNotifyFact(
   return true;
 }
 
+Node BVSolverSimple::getValueFromSatSolver(TNode node, bool initialize)
+{
+  if (node.isConst())
+  {
+    return node;
+  }
+
+  if (!d_bitblaster->hasBBTerm(node))
+  {
+    return initialize ? utils::mkConst(utils::getSize(node), 0u) : Node();
+  }
+
+  Valuation& val = d_state.getValuation();
+
+  std::vector<Node> bits;
+  d_bitblaster->getBBTerm(node, bits);
+  Integer value(0), one(1), zero(0), bit;
+  for (size_t i = 0, size = bits.size(), j = size - 1; i < size; ++i, --j)
+  {
+    bool satValue;
+    if (val.hasSatValue(bits[j], satValue))
+    {
+      bit = satValue ? one : zero;
+    }
+    else
+    {
+      if (!initialize) return Node();
+      bit = zero;
+    }
+    value = value * 2 + bit;
+  }
+  return utils::mkConst(bits.size(), value);
+}
+
+Node BVSolverSimple::getValue(TNode node)
+{
+  std::vector<TNode> visit;
+  std::unordered_map<Node, Node> modelCache;
+
+  TNode cur;
+  visit.push_back(node);
+  do
+  {
+    cur = visit.back();
+    visit.pop_back();
+
+    auto it = modelCache.find(cur);
+    if (it != modelCache.end() && !it->second.isNull())
+    {
+      continue;
+    }
+
+    if (d_bitblaster->hasBBTerm(cur))
+    {
+      Node value = getValueFromSatSolver(cur, false);
+      if (value.isConst())
+      {
+        modelCache[cur] = value;
+        continue;
+      }
+    }
+    if (Theory::isLeafOf(cur, theory::THEORY_BV))
+    {
+      Node value = getValueFromSatSolver(cur, true);
+      modelCache[cur] = value;
+      continue;
+    }
+
+    if (it == modelCache.end())
+    {
+      visit.push_back(cur);
+      modelCache.emplace(cur, Node());
+      visit.insert(visit.end(), cur.begin(), cur.end());
+    }
+    else if (it->second.isNull())
+    {
+      NodeBuilder nb(cur.getKind());
+      if (cur.getMetaKind() == kind::metakind::PARAMETERIZED)
+      {
+        nb << cur.getOperator();
+      }
+
+      std::unordered_map<Node, Node>::iterator iit;
+      for (const TNode& child : cur)
+      {
+        iit = modelCache.find(child);
+        Assert(iit != modelCache.end());
+        Assert(iit->second.isConst());
+        nb << iit->second;
+      }
+      it->second = Rewriter::rewrite(nb.constructNode());
+    }
+  } while (!visit.empty());
+
+  auto it = modelCache.find(node);
+  Assert(it != modelCache.end());
+  return it->second;
+}
+
+EqualityStatus BVSolverSimple::getEqualityStatus(TNode a, TNode b)
+{
+  Debug("bv-simple") << "getEqualityStatus on " << a << " and " << b
+                     << std::endl;
+  Node value_a = getValue(a);
+  Node value_b = getValue(b);
+
+  if (value_a.isNull() || value_b.isNull())
+  {
+    return EQUALITY_UNKNOWN;
+  }
+
+  if (value_a == value_b)
+  {
+    Debug("bv-simple") << EQUALITY_TRUE_IN_MODEL << std::endl;
+    return EQUALITY_TRUE_IN_MODEL;
+  }
+  Debug("bv-simple") << EQUALITY_FALSE_IN_MODEL << std::endl;
+  return EQUALITY_FALSE_IN_MODEL;
+}
+
 bool BVSolverSimple::collectModelValues(TheoryModel* m,
                                         const std::set<Node>& termSet)
 {

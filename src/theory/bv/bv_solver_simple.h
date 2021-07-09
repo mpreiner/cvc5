@@ -54,6 +54,8 @@ class BVSolverSimple : public BVSolver
 
   std::string identify() const override { return "BVSolverSimple"; };
 
+  EqualityStatus getEqualityStatus(TNode a, TNode b) override;
+
   bool collectModelValues(TheoryModel* m,
                           const std::set<Node>& termSet) override;
 
@@ -66,6 +68,21 @@ class BVSolverSimple : public BVSolver
    * inference manager.
    */
   void addBBLemma(TNode fact);
+
+  /**
+   * Get value of `node` from SAT solver.
+   *
+   * The `initialize` flag indicates whether bits should be zero-initialized
+   * if they were not bit-blasted yet.
+   */
+  Node getValueFromSatSolver(TNode node, bool initialize);
+
+  /**
+   * Get the current value of `node`.
+   *
+   * Computes the value if `node` was not yet bit-blasted.
+   */
+  Node getValue(TNode node);
 
   /** Proof generator. */
   std::unique_ptr<TConvProofGenerator> d_tcpg;
