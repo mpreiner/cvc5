@@ -318,6 +318,7 @@ if(ENABLE_COVERAGE)
   include(CodeCoverage)
   APPEND_COVERAGE_COMPILER_FLAGS()
   add_definitions(-DCVC5_COVERAGE)
+  set(COVERAGE_LCOV_EXCLUDES "/usr/include/*" "${CMAKE_BINARY_DIR}/deps/*")
   # Note: The ctest command returns a non-zero exit code if tests fail or run
   # into a timeout. As a consequence, the coverage report is not generated. To
   # prevent this we always return with exit code 0 after the ctest command has
