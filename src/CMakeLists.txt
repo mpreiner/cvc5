@@ -640,6 +640,8 @@ libcvc5_add_sources(
   theory/bv/bv_solver_bitblast.h
   theory/bv/bv_solver_bitblast_internal.cpp
   theory/bv/bv_solver_bitblast_internal.h
+  theory/bv/bv_solver_bitwuzla.cpp
+  theory/bv/bv_solver_bitwuzla.h
   theory/bv/int_blaster.cpp
   theory/bv/int_blaster.h
   theory/bv/proof_checker.cpp
@@ -1499,6 +1501,14 @@ endif()
 add_dependencies(cvc5-obj CaDiCaL)
 target_include_directories(cvc5-obj SYSTEM PRIVATE ${CaDiCaL_INCLUDE_DIR})
 target_link_libraries(cvc5 PRIVATE $<BUILD_INTERFACE:CaDiCaL> $<INSTALL_INTERFACE:cadical>)
+
+## TODO: Link against Bitwuzla
+#include(FindPkgConfig)
+target_include_directories(cvc5-obj SYSTEM PRIVATE ../install/include/)
+target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5/install/lib/libbitwuzla.a)
+target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5/install/lib/libbitwuzlabb.a)
+target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5/install/lib/libbitwuzlabv.a)
+target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5/install/lib/libbitwuzlals.a)
 
 if(USE_CLN)
   add_dependencies(cvc5-obj CLN)
