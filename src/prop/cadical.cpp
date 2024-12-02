@@ -17,12 +17,15 @@
 
 #include "prop/cadical.h"
 
+#include <cadical.hpp>
+#include <cadical/tracer.hpp>
 #include <deque>
 
 #include "base/check.h"
 #include "options/base_options.h"
 #include "options/main_options.h"
 #include "options/proof_options.h"
+#include "prop/sat_solver_types.h"
 #include "prop/theory_proxy.h"
 #include "util/resource_manager.h"
 #include "util/statistics_registry.h"
@@ -68,6 +71,114 @@ SatLiteral toSatLiteral(CadicalLit lit)
 CadicalVar toCadicalVar(SatVariable var) { return var; }
 
 }  // namespace helper functions
+
+class ProofTracer : public CaDiCaL::Tracer
+{
+ public:
+  ProofTracer()
+  {
+    d_clauses.emplace_back();
+  }
+
+  void add_original_clause(uint64_t clause_id,
+                           bool redundant,
+                           const std::vector<int>& clause,
+                           bool restored) override
+  {
+    Assert(d_clauses.size() == clause_id);
+    d_clauses.emplace_back();
+    d_orig_clauses.emplace(clause_id, clause);
+    std::cout << "orig: " << clause_id <<std::endl;
+    ++d_num_orig;
+  }
+
+  void add_derived_clause(uint64_t clause_id,
+                          bool redundant,
+                          const std::vector<int>& clause,
+                          const std::vector<uint64_t>& antecedents) override
+  {
+    Assert(d_clauses.size() == clause_id);
+    d_clauses.emplace_back(antecedents);
+
+    std::cout << "deriv: " << clause_id << ":";
+    for (const auto aid : antecedents)
+    {
+         std::cout << " " << aid;
+    }
+    std::cout << std::endl;
+  }
+
+  void delete_clause(uint64_t clause_id,
+                     bool redundant,
+                     const std::vector<int>& clause) override
+  {
+    std::cout << "del: " << clause_id << std::endl;
+  }
+
+  void conclude_unsat(CaDiCaL::ConclusionType type,
+                      const std::vector<uint64_t>& clause_ids) override
+  {
+    std::cout << "conclude: " << type << ":";
+    for (const auto cid : clause_ids)
+    {
+       std::cout << " " << cid;
+    }
+    std::cout << std::endl;
+    d_final_clauses = clause_ids;
+    //compute_unsat_core(clause_ids);
+  }
+
+  void compute_unsat_core(std::vector<SatClause>& unsat_core)
+  {
+    std::vector<uint64_t> core;
+    std::vector<uint64_t> visit{d_final_clauses};
+    std::vector<bool> visited(d_clauses.size() + 1, false);
+
+    while (!visit.empty())
+    {
+      const uint64_t clause_id = visit.back();
+      visit.pop_back();
+      Assert(clause_id < d_clauses.size());
+      const auto& antecedents = d_clauses[clause_id];
+
+      if (!visited[clause_id])
+      {
+        visited[clause_id] = true;
+
+        if (antecedents.empty())
+        {
+          core.push_back(clause_id);
+        }
+        else
+        {
+          visit.insert(visit.end(), antecedents.begin(), antecedents.end());
+        }
+      }
+    }
+
+    std::cout << "core size: " << core.size() << std::endl;
+    std::cout << "orig: " << d_num_orig << std::endl;
+
+    for (const uint64_t cid : core)
+    {
+      const auto& clause = d_orig_clauses.at(cid);
+      auto& sat_clause = unsat_core.emplace_back();
+       std::cout << "core:";
+       for (const auto& lit : clause)
+       {
+          sat_clause.emplace_back(toSatLiteral(lit));
+         std::cout << " " << lit;
+       }
+       std::cout << std::endl;
+    }
+  }
+
+private:
+  std::vector<std::vector<uint64_t>> d_clauses;
+  std::unordered_map<uint64_t, std::vector<int>> d_orig_clauses;
+  std::vector<uint64_t> d_final_clauses;
+  uint64_t d_num_orig = 0;
+};
 
 class CadicalPropagator : public CaDiCaL::ExternalPropagator
 {
@@ -1048,7 +1159,12 @@ void CadicalSolver::init()
   }
 }
 
-CadicalSolver::~CadicalSolver() {}
+CadicalSolver::~CadicalSolver() {
+  if (d_proof_tracer != nullptr)
+  {
+  d_solver->disconnect_proof_tracer(d_proof_tracer.get());
+  }
+}
 
 /**
  * Terminator class that notifies CaDiCaL to terminate when the resource limit
@@ -1114,6 +1230,11 @@ SatValue CadicalSolver::_solve(const std::vector<SatLiteral>& assumptions)
     Assert(res != SAT_VALUE_TRUE || d_propagator->done());
     Trace("cadical::propagator") << "solve done: " << res << std::endl;
     d_propagator->in_search(false);
+  }
+  if (res == SAT_VALUE_FALSE)
+  {
+    std::vector<SatClause> unsat_core;
+    getUnsatCore(unsat_core);
   }
   ++d_statistics.d_numSatCalls;
   d_inSatMode = (res == SAT_VALUE_TRUE);
@@ -1205,6 +1326,14 @@ void CadicalSolver::getUnsatAssumptions(std::vector<SatLiteral>& assumptions)
   }
 }
 
+void CadicalSolver::getUnsatCore(std::vector<SatClause>& unsat_core)
+{
+  if (d_proof_tracer != nullptr)
+  {
+    d_proof_tracer->compute_unsat_core(unsat_core);
+  }
+}
+
 void CadicalSolver::interrupt() { d_solver->terminate(); }
 
 SatValue CadicalSolver::value(SatLiteral l) { return d_propagator->value(l); }
@@ -1246,6 +1375,13 @@ void CadicalSolver::initialize(context::Context* context,
   {
     d_clause_learner.reset(new ClauseLearner(*theoryProxy, 0));
     d_solver->connect_learner(d_clause_learner.get());
+  }
+  d_proof_tracer.reset(new ProofTracer());
+  d_solver->connect_proof_tracer(d_proof_tracer.get(), true);
+
+  if (d_env.getOptions().proof.propProofMode == options::PropProofMode::PROOF)
+  {
+
   }
 
   init();
