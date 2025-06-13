@@ -1548,10 +1548,10 @@ target_link_libraries(cvc5 PRIVATE $<BUILD_INTERFACE:CaDiCaL> $<INSTALL_INTERFAC
 ## TODO: Link against Bitwuzla
 #include(FindPkgConfig)
 target_include_directories(cvc5-obj SYSTEM PRIVATE ../install/include/)
-target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5/install/lib/libbitwuzla.a)
-target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5/install/lib/libbitwuzlabb.a)
-target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5/install/lib/libbitwuzlabv.a)
-target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5/install/lib/libbitwuzlals.a)
+target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5-fork/wt-bitwuzla/install/lib/libbitwuzla.a)
+target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5-fork/wt-bitwuzla/install/lib/libbitwuzlabb.a)
+target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5-fork/wt-bitwuzla/install/lib/libbitwuzlabv.a)
+target_link_libraries(cvc5 PRIVATE /home/ma/git/cvc5-fork/wt-bitwuzla/install/lib/libbitwuzlals.a)
 
 if(USE_CLN)
   add_dependencies(cvc5-obj CLN)

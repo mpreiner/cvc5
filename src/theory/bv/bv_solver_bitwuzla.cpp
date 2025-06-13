@@ -15,6 +15,8 @@
 
 #include "theory/bv/bv_solver_bitwuzla.h"
 
+#include <bitwuzla/cpp/bitwuzla.h>
+
 #include "options/bv_options.h"
 #include "prop/sat_solver_factory.h"
 #include "theory/bv/theory_bv.h"
@@ -211,27 +213,27 @@ void BVSolverBitwuzla::computeRelevantTerms(std::set<Node>& termSet)
   //   d_bitblaster->computeRelevantTerms(termSet);
   // }
   //  TODO:
-  Assert(false);
+  // Assert(false);
 }
 
 bool BVSolverBitwuzla::collectModelValues(TheoryModel* m,
                                           const std::set<Node>& termSet)
 {
-  Assert(false);
-  /*for (const auto& term : termSet)*/
-  /*{*/
-  /*  if (!d_bitblaster->isVariable(term))*/
-  /*  {*/
-  /*    continue;*/
-  /*  }*/
-  /**/
-  /*  Node value = getValue(term, true);*/
-  /*  Assert(value.isConst());*/
-  /*  if (!m->assertEquality(term, value, true))*/
-  /*  {*/
-  /*    return false;*/
-  /*  }*/
-  /*}*/
+  for (const auto& term : termSet)
+  {
+    auto it = d_translation_cache.find(term);
+    if (it == d_translation_cache.end() || !it->second.is_const())
+    {
+      continue;
+    }
+
+    Node value = getValue(term, true);
+    Assert(value.isConst());
+    if (!m->assertEquality(term, value, true))
+    {
+      return false;
+    }
+  }
   /**/
   /*// In eager bitblast mode we also have to collect the model values for*/
   /*// Boolean variables in the CNF stream.*/
@@ -261,6 +263,7 @@ void BVSolverBitwuzla::initSatSolver()
 {
   bitwuzla::Options opts;
   opts.set(bitwuzla::Option::PRODUCE_UNSAT_ASSUMPTIONS, true);
+  opts.set(bitwuzla::Option::PRODUCE_MODELS, true);
   d_bitwuzla.reset(new bitwuzla::Bitwuzla(d_bitwuzla_tm, opts));
 }
 
@@ -325,7 +328,10 @@ const bitwuzla::Term& BVSolverBitwuzla::translate(const Node& n)
     auto [it, inserted] = d_translation_cache.emplace(cur, bitwuzla::Term());
     if (inserted)
     {
-      visit.insert(visit.end(), cur.begin(), cur.end());
+      if (cur.getKind() != Kind::APPLY_SELECTOR)
+      {
+        visit.insert(visit.end(), cur.begin(), cur.end());
+      }
       continue;
     }
     else if (it->second.is_null())
@@ -412,33 +418,19 @@ Node BVSolverBitwuzla::getValue(TNode node, bool initialize)
   {
     return node;
   }
-  Assert(false);
-  return Node();
-  /**/
-  /*if (!d_bitblaster->hasBBTerm(node))*/
-  /*{*/
-  /*  return initialize ? utils::mkConst(utils::getSize(node), 0u) : Node();*/
-  /*}*/
-  /**/
-  /*std::vector<Node> bits;*/
-  /*d_bitblaster->getBBTerm(node, bits);*/
-  /*Integer value(0), one(1), zero(0), bit;*/
-  /*for (size_t i = 0, size = bits.size(), j = size - 1; i < size; ++i, --j)*/
-  /*{*/
-  /*  if (d_cnfStream->hasLiteral(bits[j]))*/
-  /*  {*/
-  /*    prop::SatLiteral lit = d_cnfStream->getLiteral(bits[j]);*/
-  /*    prop::SatValue val = d_satSolver->modelValue(lit);*/
-  /*    bit = val == prop::SatValue::SAT_VALUE_TRUE ? one : zero;*/
-  /*  }*/
-  /*  else*/
-  /*  {*/
-  /*    if (!initialize) return Node();*/
-  /*    bit = zero;*/
-  /*  }*/
-  /*  value = value * 2 + bit;*/
-  /*}*/
-  /*return utils::mkConst(bits.size(), value);*/
+  auto it = d_translation_cache.find(node);
+  Assert(it != d_translation_cache.end());
+  auto val = d_bitwuzla->get_value(it->second);
+  if (node.getType().isBitVector())
+  {
+    auto binval = val.value<std::string>(2);
+    return utils::mkConst(nodeManager(), BitVector(binval));
+  }
+  else
+  {
+    Assert(node.getType().isBoolean());
+    return utils::mkConst(nodeManager(), val.value<bool>());
+  }
 }
 
 }  // namespace bv
