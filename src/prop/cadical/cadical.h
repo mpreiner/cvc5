@@ -1,6 +1,6 @@
 /******************************************************************************
  * Top contributors (to current version):
- *   Aina Niemetz, Mathias Preiner, Andrew Reynolds
+ *   Mathias Preiner, Aina Niemetz, Andrew Reynolds
  *
  * This file is part of the cvc5 project.
  *
@@ -29,12 +29,13 @@ class Solver;
 class Terminator;
 }  // namespace CaDiCaL
 
-namespace cvc5::internal {
-namespace prop {
+namespace cvc5::internal::prop {
 
+namespace cadical {
 class CadicalPropagator;
-class ClauseLearner;
 class ProofTracer;
+}  // namespace cadical
+class ClauseLearner;
 
 class CadicalSolver : public CDCLTSatSolver, protected EnvObj
 {
@@ -130,11 +131,11 @@ class CadicalSolver : public CDCLTSatSolver, protected EnvObj
   /** The associated theory proxy (for CDCL(T) mode). */
   prop::TheoryProxy* d_proxy = nullptr;
   /** The CaDiCaL propagator (for CDCL(T) mode). */
-  std::unique_ptr<CadicalPropagator> d_propagator;
+  std::unique_ptr<cadical::CadicalPropagator> d_propagator;
   /** Clause learner instance for notifications about learned clauses. */
   std::unique_ptr<ClauseLearner> d_clause_learner;
   /** Proof tracer instance for extracting unsat cores. */
-  std::unique_ptr<ProofTracer> d_proof_tracer;
+  std::unique_ptr<cadical::ProofTracer> d_proof_tracer;
 
   /**
    * Stores the current set of assumptions provided via solve() and is used to
@@ -167,7 +168,6 @@ class CadicalSolver : public CDCLTSatSolver, protected EnvObj
   Statistics d_statistics;
 };
 
-}  // namespace prop
-}  // namespace cvc5::internal
+}  // namespace cvc5::internal::prop
 
 #endif  // CVC5__PROP__CADICAL_H
