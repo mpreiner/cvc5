@@ -308,6 +308,18 @@ void AextArraySolver::checkAccess(TNode select)
         {
           // Representatives differ → pass through (RowD).
           // Add i != j as path condition guard.
+          // Also generate a splitting lemma if the EE doesn't know
+          // the disequality, so the SAT solver considers both cases.
+          if (!d_ee->areDisequal(index, n[1], false))
+          {
+            Node split = index.eqNode(n[1]);
+            if (d_lemmaCache.insert(split))
+            {
+              Trace("arrays::aext") << "Index split: " << split << std::endl;
+              d_im.lemma(split.orNode(split.notNode()),
+                         InferenceId::ARRAYS_AEXT_ROW);
+            }
+          }
           std::vector<Node> newConds(entry.pathConds);
           newConds.push_back(index.eqNode(n[1]).notNode());
           Trace("arrays::aext")
@@ -331,6 +343,16 @@ void AextArraySolver::checkAccess(TNode select)
           TNode storeIndexRep = d_ee->getRepresentative(store[1]);
           if (indexRep != storeIndexRep)
           {
+            if (!d_ee->areDisequal(index, store[1], false))
+            {
+              Node split = index.eqNode(store[1]);
+              if (d_lemmaCache.insert(split))
+              {
+                Trace("arrays::aext") << "Index split: " << split << std::endl;
+                d_im.lemma(split.orNode(split.notNode()),
+                           InferenceId::ARRAYS_AEXT_ROW);
+              }
+            }
             std::vector<Node> newConds(entry.pathConds);
             newConds.push_back(index.eqNode(store[1]).notNode());
             Trace("arrays::aext")
