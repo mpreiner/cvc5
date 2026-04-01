@@ -22,6 +22,7 @@
 #include "options/smt_options.h"
 #include "proof/proof_checker.h"
 #include "smt/logic_exception.h"
+#include "theory/arrays/aext_solver.h"
 #include "theory/arrays/skolem_cache.h"
 #include "theory/arrays/theory_arrays_rewriter.h"
 #include "theory/decision_manager.h"
@@ -116,6 +117,12 @@ TheoryArrays::TheoryArrays(Env& env,
   // inference manager
   d_theoryState = &d_state;
   d_inferManager = &d_im;
+
+  // Construct the AEXT sub-solver if requested
+  if (options().arrays.arraysSolver == options::ArraysSolverMode::AEXT)
+  {
+    d_aextSolver.reset(new AextArraySolver(env, d_state, d_im));
+  }
 }
 
 TheoryArrays::~TheoryArrays()
@@ -158,7 +165,15 @@ void TheoryArrays::finishInit()
   {
     d_equalityEngine->addFunctionKind(Kind::STORE);
   }
+
+  // Initialize the AEXT sub-solver with the equality engine
+  if (d_aextSolver)
+  {
+    d_aextSolver->finishInit(d_equalityEngine);
+  }
 }
+
+bool TheoryArrays::useAextSolver() const { return d_aextSolver != nullptr; }
 
 /////////////////////////////////////////////////////////////////////////////
 // PREPROCESSING
@@ -768,6 +783,15 @@ void TheoryArrays::preRegisterTermInternal(TNode node)
 
       Assert((d_isPreRegistered.insert(node), true));
 
+      if (useAextSolver())
+      {
+        // AEXT solver: register the select, skip eager Row lemma generation.
+        // Still record reads in sharing data structures for computeCareGraph.
+        d_aextSolver->preRegisterSelect(node);
+        d_reads.push_back(node);
+        break;
+      }
+
       Assert(d_equalityEngine->getRepresentative(store) == store);
       d_infoMap.addIndex(store, node[1]);
 
@@ -824,6 +848,14 @@ void TheoryArrays::preRegisterTermInternal(TNode node)
       {
         d_mayEqualEqualityEngine.assertEquality(node.eqNode(a), true, d_true);
         Assert(d_mayEqualEqualityEngine.consistent());
+      }
+
+      if (useAextSolver())
+      {
+        // AEXT solver: register store, skip eager lemma generation.
+        // RIntro1 is handled by the AEXT solver.
+        d_aextSolver->preRegisterStore(node);
+        break;
       }
 
       TNode i = node[1];
@@ -1321,6 +1353,13 @@ Node TheoryArrays::getSkolem(TNode ref)
 
 void TheoryArrays::postCheck(Effort level)
 {
+  // Delegate to the AEXT solver if active
+  if (useAextSolver())
+  {
+    d_aextSolver->check(level);
+    return;
+  }
+
   bool eagerLemmas = options().arrays.arraysEagerLemmas;
   bool weakEquiv = options().arrays.arraysWeakEquivalence;
 
@@ -1480,6 +1519,12 @@ void TheoryArrays::notifyFact(TNode atom, bool pol, TNode fact, bool isInternal)
     // Apply ArrDiseq Rule if diseq is between arrays
     if (fact[0][0].getType().isArray() && !d_state.isInConflict())
     {
+      if (useAextSolver())
+      {
+        // AEXT solver handles disequalities in its check() method
+        d_aextSolver->notifyDisequality(fact[0][0], fact[0][1], fact);
+        return;
+      }
       NodeManager* nm = nodeManager();
 
       TNode k;
@@ -1640,6 +1685,43 @@ void TheoryArrays::setNonLinear(TNode a)
                           << ", " << j << ", " << i << ")\n";
       queueRowLemma(lem);
     }
+  }
+}
+
+void TheoryArrays::mergeArraysModelOnly(TNode a, TNode b)
+{
+  Assert(a.getType().isArray() && b.getType().isArray());
+  a = d_equalityEngine->getRepresentative(a);
+  Assert(d_equalityEngine->getRepresentative(b) == a);
+
+  // Maintain d_mayEqualEqualityEngine and d_defValues for model construction
+  TNode mayRepA = d_mayEqualEqualityEngine.getRepresentative(a);
+  TNode mayRepB = d_mayEqualEqualityEngine.getRepresentative(b);
+
+  DefValMap::iterator itA = d_defValues.find(mayRepA);
+  DefValMap::iterator itB = d_defValues.find(mayRepB);
+  TNode defValue;
+
+  if (itA != d_defValues.end())
+  {
+    defValue = (*itA).second;
+    if (itB != d_defValues.end() && defValue != (*itB).second)
+    {
+      throw LogicException(
+          "Array theory solver does not yet support write-chains connecting "
+          "two different constant arrays");
+    }
+  }
+  else if (itB != d_defValues.end())
+  {
+    defValue = (*itB).second;
+  }
+  d_mayEqualEqualityEngine.assertEquality(a.eqNode(b), true, d_true);
+  Assert(d_mayEqualEqualityEngine.consistent());
+  if (!defValue.isNull())
+  {
+    mayRepA = d_mayEqualEqualityEngine.getRepresentative(a);
+    d_defValues[mayRepA] = defValue;
   }
 }
 

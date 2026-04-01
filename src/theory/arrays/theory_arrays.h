@@ -15,12 +15,14 @@
 #ifndef CVC5__THEORY__ARRAYS__THEORY_ARRAYS_H
 #define CVC5__THEORY__ARRAYS__THEORY_ARRAYS_H
 
+#include <memory>
 #include <tuple>
 #include <unordered_map>
 
 #include "context/cdhashmap.h"
 #include "context/cdhashset.h"
 #include "context/cdqueue.h"
+#include "theory/arrays/aext_solver.h"
 #include "theory/arrays/array_info.h"
 #include "theory/arrays/inference_manager.h"
 #include "theory/arrays/proof_checker.h"
@@ -349,7 +351,14 @@ class TheoryArrays : public Theory
     {
       if (t1.getType().isArray())
       {
-        d_arrays.mergeArrays(t1, t2);
+        if (d_arrays.useAextSolver())
+        {
+          d_arrays.mergeArraysModelOnly(t1, t2);
+        }
+        else
+        {
+          d_arrays.mergeArrays(t1, t2);
+        }
       }
     }
     void eqNotifyDisequal(CVC5_UNUSED TNode t1,
@@ -463,6 +472,12 @@ class TheoryArrays : public Theory
                     TNode a = TNode(),
                     TNode b = TNode());
   void mergeArrays(TNode a, TNode b);
+  /**
+   * Lightweight merge for model construction support when using the AEXT
+   * solver. Maintains d_mayEqualEqualityEngine and d_defValues without
+   * generating Row lemmas or updating d_infoMap.
+   */
+  void mergeArraysModelOnly(TNode a, TNode b);
   void checkStore(TNode a);
   void checkRowForIndex(TNode i, TNode a);
   void checkRowLemmas(TNode a, TNode b);
@@ -505,7 +520,12 @@ class TheoryArrays : public Theory
    * RIntro1 and RIntro2 rules.
    */
   void computeRelevantTerms(std::set<Node>& termSet) override;
-}; /* class TheoryArrays */
+
+  /** Whether the AEXT sub-solver is active */
+  bool useAextSolver() const;
+  /** The AEXT calculus-based array solver (nullptr if not in use) */
+  std::unique_ptr<AextArraySolver> d_aextSolver;
+};/* class TheoryArrays */
 
 }  // namespace arrays
 }  // namespace theory

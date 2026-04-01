@@ -2,6 +2,21 @@ id     = "ARRAYS"
 name   = "Arrays Theory"
 
 [[option]]
+  name       = "arraysSolver"
+  category   = "expert"
+  long       = "arrays-solver=MODE"
+  type       = "ArraysSolverMode"
+  default    = "DEFAULT"
+  help       = "choose which array theory solver to use, see --arrays-solver=help"
+  help_mode  = "Array theory solver variant."
+[[option.mode.DEFAULT]]
+  name = "default"
+  help = "use the default (legacy) array solver"
+[[option.mode.AEXT]]
+  name = "aext"
+  help = "use the AEXT calculus-based array solver (Brummayer/Biere)"
+
+[[option]]
   name       = "arraysOptimizeLinear"
   category   = "expert"
   long       = "arrays-optimize-linear"

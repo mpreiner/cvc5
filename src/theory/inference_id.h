@@ -220,6 +220,13 @@ enum class InferenceId
   ARRAYS_CONST_ARRAY_DEFAULT,
   // an internally inferred tautological equality
   ARRAYS_EQ_TAUTOLOGY,
+  // ---------------------------------- aext array solver
+  // read-over-write lemma from aext solver
+  ARRAYS_AEXT_ROW,
+  // congruence lemma from aext solver
+  ARRAYS_AEXT_CONGRUENCE,
+  // extensionality witness lemma from aext solver
+  ARRAYS_AEXT_DISEQUALITY,
   // ---------------------------------- end arrays theory
 
   // ---------------------------------- bags theory
