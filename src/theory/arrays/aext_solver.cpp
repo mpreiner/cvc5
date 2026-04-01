@@ -180,7 +180,16 @@ void AextArraySolver::checkAccess(TNode select)
     std::vector<Node> pathConds;
   };
   std::vector<VisitEntry> visit;
-  visit.push_back({select[0], {}});
+  // If the EE has merged select[0] with other arrays, the representative
+  // may differ from select[0]. Include the array equality as a starting
+  // path condition to guard any lemmas that depend on this merge.
+  std::vector<Node> startConds;
+  TNode startRep = d_ee->getRepresentative(select[0]);
+  if (select[0] != startRep)
+  {
+    startConds.push_back(select[0].eqNode(startRep));
+  }
+  visit.push_back({select[0], std::move(startConds)});
 
   std::unordered_set<TNode> visited;
 
@@ -253,16 +262,26 @@ void AextArraySolver::checkAccess(TNode select)
           if (!d_ee->areEqual(select, n[2]))
           {
             Node conc = select.eqNode(n[2]);
-            // Explanation: path conditions (from propagation to this
-            // array) plus the index equality (if syntactically different).
+            // Explanation: path conditions plus index equality, and
+            // array equality if the store was brought in by an EE merge
+            // (not structurally present at the propagation target).
             std::vector<Node> expVec(entry.pathConds);
             if (index != n[1])
             {
               expVec.push_back(index.eqNode(n[1]));
             }
+            // Guard with array equality if the select's original array
+            // is different from the store (the propagation path may rely
+            // on EE merges not captured in path conditions).
+            if (select[0] != n)
+            {
+              expVec.push_back(select[0].eqNode(static_cast<Node>(n)));
+            }
             Node reason = nm->mkAnd(expVec);
             Trace("arrays::aext")
-                << "AccessStore: " << reason << " => " << conc << std::endl;
+                << "AccessStore: entry.array=" << entry.array
+                << " store=" << n << " reason=" << reason << " => " << conc
+                << std::endl;
             d_im.arrayLemma(conc,
                             InferenceId::ARRAYS_AEXT_ROW,
                             reason,
@@ -291,6 +310,9 @@ void AextArraySolver::checkAccess(TNode select)
           // Add i != j as path condition guard.
           std::vector<Node> newConds(entry.pathConds);
           newConds.push_back(index.eqNode(n[1]).notNode());
+          Trace("arrays::aext")
+              << "  RowD push: " << n[0] << " conds=" << newConds.size()
+              << std::endl;
           visit.push_back({n[0], std::move(newConds)});
         }
         ++eqi2;
@@ -311,6 +333,9 @@ void AextArraySolver::checkAccess(TNode select)
           {
             std::vector<Node> newConds(entry.pathConds);
             newConds.push_back(index.eqNode(store[1]).notNode());
+            Trace("arrays::aext")
+                << "  RowU push: " << store << " conds=" << newConds.size()
+                << std::endl;
             visit.push_back({store, std::move(newConds)});
           }
         }
