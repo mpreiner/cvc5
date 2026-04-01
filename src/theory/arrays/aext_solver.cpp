@@ -34,10 +34,12 @@ AextArraySolver::AextArraySolver(Env& env,
       d_arrayDisequalities(context()),
       d_witnessDiseqs(context()),
       d_lemmaCache(userContext()),
-      d_numRowLemmas(statisticsRegistry().registerInt(
-          "theory::arrays::aext::numRowLemmas")),
-      d_numDisequality(statisticsRegistry().registerInt(
-          "theory::arrays::aext::numDisequality")),
+      d_numCongruenceLemmas(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numCongruenceLemmas")),
+      d_numAccessStoreLemmas(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numAccessStoreLemmas")),
+      d_numDisequalityLemmas(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numDisequalityLemmas")),
       d_numCheckCalls(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCheckCalls"))
 {
@@ -61,26 +63,31 @@ void AextArraySolver::preRegisterStore(TNode node)
 {
   Assert(node.getKind() == Kind::STORE);
   d_stores.push_back(node);
-  // InitW: assert RIntro1 axiom select(store(a, i, v), i) = v
+
+  // InitW: create virtual read select(store(a, i, v), i) and assert RIntro1.
   NodeManager* nm = nodeManager();
   Node ni = nm->mkNode(Kind::SELECT, node, node[1]);
   if (!d_ee->hasTerm(ni))
   {
     d_ee->addTerm(ni);
   }
+  // Explicitly register the virtual read (the eqNotifyNewClass callback
+  // can't do it because hasTerm already returns true).
+  preRegisterSelect(ni);
+
+  // RIntro1: select(store(a, i, v), i) = v
   Node eq = ni.eqNode(node[2]);
   d_im.assertInference(eq,
-                       true,
-                       InferenceId::ARRAYS_READ_OVER_WRITE_1,
-                       nm->mkConst<bool>(true),
-                       ProofRule::ARRAYS_READ_OVER_WRITE_1);
+                        true,
+                        InferenceId::ARRAYS_READ_OVER_WRITE_1,
+                        nm->mkConst<bool>(true),
+                        ProofRule::ARRAYS_READ_OVER_WRITE_1);
 }
 
 void AextArraySolver::notifyMerge(TNode /*a*/, TNode /*b*/)
 {
   // Merges are handled lazily: the next check() call will re-propagate
-  // selects through the updated equivalence classes. The parent map is
-  // rebuilt each check() so new merges are automatically reflected.
+  // selects through the updated equivalence classes.
 }
 
 void AextArraySolver::notifyDisequality(TNode a, TNode /*b*/, TNode reason)
@@ -102,27 +109,24 @@ void AextArraySolver::check(Theory::Effort level)
 
   ++d_numCheckCalls;
   Trace("arrays::aext") << "AextArraySolver::check() with " << d_selects.size()
-                        << " selects and " << d_stores.size() << " stores"
-                        << std::endl;
+                         << " selects and " << d_stores.size() << " stores"
+                         << std::endl;
 
-  // Clear per-check caches
-  d_checkCache.clear();
+  // Clear per-check data structures
+  d_checkAccessCache.clear();
+  d_arrayModels.clear();
 
   // Build the parent store map for RowU propagation.
-  // Maps array representative -> STORE terms whose base is in that EQ class.
   buildParentMap();
 
-  // Propagate all selects through store chains (RowD + RowU).
-  // No fixed-point loop needed within a single check(): lemmas go to the SAT
-  // solver and trigger a new check() call when processed. Internal facts
-  // (assertInference) take effect immediately via the EE.
+  // Propagate all registered selects through store chains.
   for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
   {
     if (d_state.isInConflict())
     {
       return;
     }
-    propagateSelect(d_selects[i]);
+    checkAccess(d_selects[i]);
   }
 
   // Handle disequalities (DisEq rule)
@@ -146,121 +150,177 @@ void AextArraySolver::buildParentMap()
     }
     TNode baseRep = d_ee->getRepresentative(store[0]);
     d_parentStores[baseRep].push_back(store);
-    Trace("arrays::aext::debug")
-        << "  parentMap: rep(" << store[0] << ") = " << baseRep << " -> store "
-        << store << std::endl;
   }
 }
 
-bool AextArraySolver::propagateSelect(TNode select)
+void AextArraySolver::checkAccess(TNode select)
 {
   Assert(select.getKind() == Kind::SELECT);
 
-  // Skip if already propagated in this check
-  if (!d_checkCache.insert(select).second)
+  if (!d_checkAccessCache.insert(select).second)
   {
-    return false;
+    return;
   }
   if (!d_ee->hasTerm(select))
   {
-    return false;
+    return;
   }
 
-  bool changed = false;
   TNode index = select[1];
-  TNode arrayRep = d_ee->getRepresentative(select[0]);
-
-  Trace("arrays::aext::debug") << "  propagateSelect: " << select
-                               << " arrayRep=" << arrayRep << std::endl;
-
-  // RowD: look for STORE terms in the equivalence class of the array.
-  // If the array is equal to store(b, j, v), propagate the read through it.
-  eq::EqClassIterator eqi(arrayRep, d_ee);
-  while (!eqi.isFinished())
-  {
-    TNode n = *eqi;
-    if (n.getKind() == Kind::STORE)
-    {
-      changed |= generateRowLemma(n, index);
-    }
-    ++eqi;
-  }
-
-  // RowU: look for STORE terms whose base is in this equivalence class.
-  // If store(a, j, v) exists where a is in the same EQ class as select's
-  // array, then the read on a can be connected to a read on the store.
-  auto it = d_parentStores.find(arrayRep);
-  if (it != d_parentStores.end())
-  {
-    for (TNode store : it->second)
-    {
-      changed |= generateRowLemma(store, index);
-    }
-  }
-
-  return changed;
-}
-
-bool AextArraySolver::generateRowLemma(TNode store, TNode index)
-{
-  Assert(store.getKind() == Kind::STORE);
-  TNode storeIndex = store[1];
-
-  // Row-eq case: i = j, handled by RIntro1 + EE congruence
-  if (d_ee->areEqual(index, storeIndex))
-  {
-    return false;
-  }
-
+  TNode indexRep = d_ee->getRepresentative(index);
   NodeManager* nm = nodeManager();
-  Node selStore = nm->mkNode(Kind::SELECT, store, index);
-  Node selBase = nm->mkNode(Kind::SELECT, store[0], index);
 
-  // Check if the rewriter can simplify these to the same term
-  // (e.g., when the index is a concrete constant different from storeIndex)
-  if (rewrite(selStore) == rewrite(selBase))
+  // Traversal uses EE representatives as "model values" (like Bitwuzla
+  // uses BV model values). Two indices are "equal" iff they have the same
+  // representative. This eliminates the "unknown" case and provides a
+  // complete partition, just like concrete model values.
+  struct VisitEntry
   {
-    return false;
-  }
+    TNode array;
+    std::vector<Node> pathConds;
+  };
+  std::vector<VisitEntry> visit;
+  visit.push_back({select[0], {}});
 
-  // If both terms exist in the EE and are already equal, nothing to do
-  if (d_ee->hasTerm(selStore) && d_ee->hasTerm(selBase)
-      && d_ee->areEqual(selStore, selBase))
+  std::unordered_set<TNode> visited;
+
+  while (!visit.empty() && !d_state.isInConflict())
   {
-    return false;
+    VisitEntry entry = std::move(visit.back());
+    visit.pop_back();
+
+    TNode arrayRep = d_ee->getRepresentative(entry.array);
+    if (!visited.insert(arrayRep).second)
+    {
+      continue;
+    }
+
+    // Step 1: Record this read and check for congruence (CongR).
+    {
+      auto& model = d_arrayModels[arrayRep];
+      auto it = model.find(indexRep);
+      if (it != model.end())
+      {
+        PropagatedRead& existing = it->second;
+        // CongR: two reads reached the same array (by representative)
+        // at the same index. Check if their values differ.
+        if (!d_ee->areEqual(select, existing.select))
+        {
+          // The explanation is the conjunction of path conditions from
+          // both reads (which justify how each read reached this array)
+          // plus the index equality (if syntactically different).
+          Node conc = select.eqNode(existing.select);
+          std::vector<Node> expVec;
+          expVec.insert(
+              expVec.end(), entry.pathConds.begin(), entry.pathConds.end());
+          expVec.insert(expVec.end(),
+                        existing.pathConds.begin(),
+                        existing.pathConds.end());
+          if (index != existing.index)
+          {
+            expVec.push_back(index.eqNode(existing.index));
+          }
+          Node exp = nm->mkAnd(expVec);
+          Trace("arrays::aext")
+              << "CongR: " << exp << " => " << conc << std::endl;
+          if (d_lemmaCache.insert(conc))
+          {
+            d_im.arrayLemma(conc,
+                            InferenceId::ARRAYS_AEXT_CONGRUENCE,
+                            exp,
+                            ProofRule::ARRAYS_READ_OVER_WRITE);
+            ++d_numCongruenceLemmas;
+          }
+        }
+        continue;
+      }
+      model[indexRep] = {select, index, entry.pathConds};
+    }
+
+    // Step 2: Check for AccessStore (matching index by representative).
+    bool foundMatch = false;
+    eq::EqClassIterator eqi(arrayRep, d_ee);
+    while (!eqi.isFinished())
+    {
+      TNode n = *eqi;
+      if (n.getKind() == Kind::STORE)
+      {
+        TNode storeIndexRep = d_ee->getRepresentative(n[1]);
+        if (indexRep == storeIndexRep)
+        {
+          // AccessStore: read index matches store index (same EE rep).
+          // The value should be the stored value n[2].
+          if (!d_ee->areEqual(select, n[2]))
+          {
+            Node conc = select.eqNode(n[2]);
+            // Explanation: path conditions (from propagation to this
+            // array) plus the index equality (if syntactically different).
+            std::vector<Node> expVec(entry.pathConds);
+            if (index != n[1])
+            {
+              expVec.push_back(index.eqNode(n[1]));
+            }
+            Node reason = nm->mkAnd(expVec);
+            Trace("arrays::aext")
+                << "AccessStore: " << reason << " => " << conc << std::endl;
+            d_im.arrayLemma(conc,
+                            InferenceId::ARRAYS_AEXT_ROW,
+                            reason,
+                            ProofRule::ARRAYS_READ_OVER_WRITE);
+            ++d_numAccessStoreLemmas;
+          }
+          foundMatch = true;
+          break;
+        }
+      }
+      ++eqi;
+    }
+
+    // Step 3: RowD -- propagate downward through stores whose index
+    // has a different representative. No AccessStore match means the
+    // read is not absorbed by any store at this array.
+    if (!foundMatch)
+    {
+      eq::EqClassIterator eqi2(arrayRep, d_ee);
+      while (!eqi2.isFinished())
+      {
+        TNode n = *eqi2;
+        if (n.getKind() == Kind::STORE)
+        {
+          // Representatives differ → pass through (RowD).
+          // Add i != j as path condition guard.
+          std::vector<Node> newConds(entry.pathConds);
+          newConds.push_back(index.eqNode(n[1]).notNode());
+          visit.push_back({n[0], std::move(newConds)});
+        }
+        ++eqi2;
+      }
+    }
+
+    // Step 4: RowU -- always propagate upward through parent stores
+    // whose base is in this EQ class, when the store index has a
+    // different representative from the read index.
+    {
+      auto pit = d_parentStores.find(arrayRep);
+      if (pit != d_parentStores.end())
+      {
+        for (TNode store : pit->second)
+        {
+          TNode storeIndexRep = d_ee->getRepresentative(store[1]);
+          if (indexRep != storeIndexRep)
+          {
+            std::vector<Node> newConds(entry.pathConds);
+            newConds.push_back(index.eqNode(store[1]).notNode());
+            visit.push_back({store, std::move(newConds)});
+          }
+        }
+      }
+    }
   }
-
-  // Generate the Row lemma (deduplicated).
-  // The lemma is: i = j OR select(store(b, j, v), i) = select(b, i)
-  // This is the standard disjunctive form of the read-over-write axiom.
-  Node lemmaConc = selStore.eqNode(selBase);
-
-  // Skip tautological lemmas (e.g. when the rewriter can simplify the
-  // select through the store already).
-  if (rewrite(lemmaConc).isConst())
-  {
-    return false;
-  }
-
-  if (!d_lemmaCache.insert(lemmaConc))
-  {
-    return false;
-  }
-
-  Node lemmaExp = index.eqNode(storeIndex).notNode();
-  Trace("arrays::aext") << "AextArraySolver::generateRowLemma: " << lemmaExp
-                        << " => " << lemmaConc << std::endl;
-  d_im.arrayLemma(lemmaConc,
-                  InferenceId::ARRAYS_AEXT_ROW,
-                  lemmaExp,
-                  ProofRule::ARRAYS_READ_OVER_WRITE);
-  ++d_numRowLemmas;
-  return true;
 }
 
-bool AextArraySolver::checkDisequalities()
+void AextArraySolver::checkDisequalities()
 {
-  bool changed = false;
   NodeManager* nm = nodeManager();
 
   for (size_t i = 0, sz = d_arrayDisequalities.size(); i < sz; ++i)
@@ -270,7 +330,6 @@ bool AextArraySolver::checkDisequalities()
       break;
     }
     TNode fact = d_arrayDisequalities[i];
-    // fact is of the form (not (= a b))
     if (d_witnessDiseqs.contains(fact))
     {
       continue;
@@ -280,30 +339,22 @@ bool AextArraySolver::checkDisequalities()
     TNode a = fact[0][0];
     TNode b = fact[0][1];
 
-    // Generate witness skolem k for this disequality
     Node k = SkolemCache::getExtIndexSkolem(nm, fact);
-
-    // Create witness reads
     Node ak = nm->mkNode(Kind::SELECT, a, k);
     Node bk = nm->mkNode(Kind::SELECT, b, k);
 
-    // DisEq lemma: (a != b) => select(a, k) != select(b, k)
     Node eq = ak.eqNode(bk);
-    Trace("arrays::aext") << "AextArraySolver::checkDisequalities: " << fact
-                          << " => " << eq.notNode() << std::endl;
+    Trace("arrays::aext") << "DisEq lemma: " << fact << " => " << eq.notNode()
+                           << std::endl;
     d_im.arrayLemma(
         eq.notNode(), InferenceId::ARRAYS_EXT, fact, ProofRule::ARRAYS_EXT);
-    ++d_numDisequality;
-    changed = true;
+    ++d_numDisequalityLemmas;
   }
-  return changed;
 }
 
 bool AextArraySolver::collectModelValues(TheoryModel* /*m*/,
                                          const std::set<Node>& /*termSet*/)
 {
-  // Model construction is delegated to TheoryArrays::collectModelValues,
-  // which reads from the EE and termSet (solver-independent).
   return true;
 }
 

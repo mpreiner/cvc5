@@ -14,17 +14,22 @@
  *   R. Brummayer, A. Biere: "Lemmas on Demand for the Extensional Theory of
  *   Arrays", JSAT 2009.
  *
- * The key idea is to lazily propagate read information through store chains
- * guided by the current interpretation (equality engine state), generating
- * lemmas only when conflicts are detected. This contrasts with the default
- * cvc5 array solver which eagerly generates Row lemmas during term
- * registration and array merges.
+ * The key idea is to propagate existing reads through store chains guided by
+ * the current equality engine state, tracking which reads reach which arrays.
+ * Lemmas are only generated when conflicts are detected:
+ *   - CongR: two reads reach the same array at the same index with different
+ *     values
+ *   - AccessStore: a read reaches a store with a matching index but
+ *     inconsistent value
+ * Lemmas use existing terms only (no new select terms are introduced) and are
+ * guarded by path conditions (index disequalities accumulated along the
+ * propagation path).
  *
- * Calculus rules implemented (from the AEXT paper):
- *   InitR/InitW  - initialize propagation for reads and virtual writes
- *   RowD/RowU    - propagate down/up through stores (read-over-write)
- *   CongR        - congruence conflict detection (handled by EE)
- *   EqR/EqL      - propagate reads across array equalities (handled by EE)
+ * Calculus rules implemented (from the AEXT paper, Figures 1-2):
+ *   InitR/InitW  - register reads and virtual writes
+ *   RowD/RowU    - propagate reads down/up through stores
+ *   CongR        - congruence conflict detection
+ *   EqR/EqL      - propagate reads across array equalities (via EE)
  *   DisEq        - extensionality witness for array disequalities
  */
 
@@ -54,8 +59,9 @@ namespace arrays {
  * Array solver based on the AEXT calculus.
  *
  * This solver is used as a sub-solver within TheoryArrays when the option
- * --arrays-solver=aext is set. It replaces the default eager lemma generation
- * with a lazy, model-guided propagation approach.
+ * --arrays-solver=aext is set. It replaces the default eager Row lemma
+ * generation with a propagation-based approach that only generates lemmas
+ * on conflicts.
  */
 class AextArraySolver : protected EnvObj
 {
@@ -75,33 +81,24 @@ class AextArraySolver : protected EnvObj
 
   //--------------------------------- term registration
   /**
-   * Register a SELECT (array read) term.
-   * Implements the InitR rule of the AEXT calculus.
+   * Register a SELECT (array read) term (InitR rule).
    * @param node a term of the form select(a, i)
    */
   void preRegisterSelect(TNode node);
   /**
-   * Register a STORE (array write) term.
-   * Implements the InitW rule and asserts the RIntro1 axiom:
-   *   select(store(a, i, v), i) = v
+   * Register a STORE (array write) term (InitW rule).
+   * Creates the virtual read select(store(a, i, v), i) and asserts RIntro1.
    * @param node a term of the form store(a, i, v)
    */
   void preRegisterStore(TNode node);
   //--------------------------------- end term registration
 
   //--------------------------------- notifications
-  /**
-   * Notify that arrays a and b have been merged in the equality engine.
-   * @param a first array term
-   * @param b second array term
-   */
+  /** Notify that arrays a and b have been merged in the equality engine. */
   void notifyMerge(TNode a, TNode b);
   /**
    * Notify that arrays a and b are disequal.
-   * Records the disequality for later witness generation (DisEq rule).
-   * @param a first array term
-   * @param b second array term
-   * @param reason the fact representing the disequality
+   * @param reason the fact representing the disequality (not (= a b))
    */
   void notifyDisequality(TNode a, TNode b, TNode reason);
   //--------------------------------- end notifications
@@ -109,65 +106,62 @@ class AextArraySolver : protected EnvObj
   //--------------------------------- main solving
   /**
    * Main theory check, called from TheoryArrays::postCheck().
-   * Propagates selects through store chains (RowD/RowU) and handles
-   * disequalities (DisEq). Congruence (CongR) and equality propagation
-   * (EqR/EqL) are handled by the equality engine.
-   * @param level the current checking effort level
+   * For each registered select, propagates it through store chains (RowD/RowU)
+   * and checks for conflicts (CongR/AccessStore). Then handles disequalities
+   * (DisEq).
    */
   void check(Theory::Effort level);
   //--------------------------------- end main solving
 
   //--------------------------------- model
-  /**
-   * Collect model values for array terms.
-   * @param m the theory model to populate
-   * @param termSet the set of relevant terms
-   * @return true if model construction succeeded
-   */
+  /** Collect model values for array terms. */
   bool collectModelValues(TheoryModel* m, const std::set<Node>& termSet);
   //--------------------------------- end model
 
  private:
+  /**
+   * A read that has been propagated to a specific array during check().
+   * Tracks the original select term and the path conditions accumulated
+   * along the propagation path.
+   */
+  struct PropagatedRead
+  {
+    TNode select;                   /**< the original SELECT term */
+    TNode index;                    /**< the read index */
+    std::vector<Node> pathConds;    /**< accumulated path conditions */
+    bool fromRowU;                  /**< arrived via RowU propagation */
+  };
+
   //--------------------------------- propagation (core AEXT calculus)
   /**
-   * Propagate a single select through store chains.
-   * Implements RowD (downward) and RowU (upward) propagation.
+   * Propagate a single select through store chains (RowD/RowU).
    *
-   * RowD: For select(a, i), if a's equivalence class contains store(b, j, v)
-   *   and i != j (known in EE), generate: i != j => select(store(b,j,v),i) =
-   *   select(b,i)
+   * Traverses the store chain from the select's array, passing through
+   * stores when the read index is known disequal from the store index.
+   * At each array reached, records the read in d_arrayModels and checks
+   * for congruence conflicts.
    *
-   * RowU: For select(a, i), if store(a, j, v) exists as a registered store
-   *   term (a is the base) and i != j, generate the same lemma connecting the
-   *   read on a to the read on the store term.
+   * - CongR: two reads at the same (array, index) with different values
+   *   generates: (pathConds1 /\ pathConds2 /\ i1=i2) => sel1 = sel2
+   * - AccessStore: a read reaches a store with matching index but wrong value
+   *   generates: (pathConds /\ i=j) => sel = storeValue
+   *
+   * No new terms are introduced; only existing select terms and store
+   * values are related.
    *
    * @param select the select term to propagate
-   * @return true if any new lemmas were generated
    */
-  bool propagateSelect(TNode select);
-  /**
-   * Generate a row-ne (read-over-write) lemma for the given store and index,
-   * if not already generated.
-   *
-   * The lemma is: index != store[1] => select(store, index) = select(store[0],
-   *   index)
-   *
-   * @param store a STORE term store(base, storeIndex, storeValue)
-   * @param index the read index
-   * @return true if a new lemma was generated
-   */
-  bool generateRowLemma(TNode store, TNode index);
+  void checkAccess(TNode select);
   /**
    * Process array disequalities (DisEq rule).
    * For each disequality a != b, creates a witness index k and generates:
    *   (a != b) => select(a, k) != select(b, k)
-   * @return true if any lemmas were generated
    */
-  bool checkDisequalities();
+  void checkDisequalities();
   /**
    * Build the parent store map for the current check.
    * Maps each array representative to the list of STORE terms whose base
-   * (child[0]) is in that equivalence class.
+   * (child[0]) is in that equivalence class. Used for RowU propagation.
    */
   void buildParentMap();
   //--------------------------------- end propagation
@@ -190,20 +184,33 @@ class AextArraySolver : protected EnvObj
   /** Lemma deduplication cache (user-context-dependent) */
   NodeSet d_lemmaCache;
 
-  /** Cache of already-propagated selects in current check() call */
-  std::unordered_set<Node> d_checkCache;
+  //--------------------------------- per-check data structures
+  /** Cache of selects already processed in current check() call */
+  std::unordered_set<Node> d_checkAccessCache;
+  /**
+   * Array models (rebuilt each check() call).
+   * For each array representative, maps index representative to the
+   * PropagatedRead that reached it. Used for congruence detection:
+   * if a second read arrives at the same (array, index) with a different
+   * value, a CongR lemma is generated.
+   */
+  std::unordered_map<TNode, std::unordered_map<TNode, PropagatedRead>>
+      d_arrayModels;
   /**
    * Parent store map (rebuilt each check() call).
-   * Maps array representative -> list of STORE terms whose base is in that
+   * Maps array representative -> STORE terms whose base is in that
    * equivalence class. Used for RowU propagation.
    */
   std::unordered_map<TNode, std::vector<TNode>> d_parentStores;
+  //--------------------------------- end per-check data structures
 
   //--------------------------------- statistics
-  /** Number of row lemmas (RowD/RowU) */
-  IntStat d_numRowLemmas;
+  /** Number of congruence lemmas (CongR) */
+  IntStat d_numCongruenceLemmas;
+  /** Number of access-store lemmas */
+  IntStat d_numAccessStoreLemmas;
   /** Number of disequality witness lemmas (DisEq) */
-  IntStat d_numDisequality;
+  IntStat d_numDisequalityLemmas;
   /** Number of check() calls */
   IntStat d_numCheckCalls;
   //--------------------------------- end statistics
