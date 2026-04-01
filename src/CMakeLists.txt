@@ -574,6 +574,8 @@ libcvc5_add_sources(
   theory/arith/theory_arith_type_rules.cpp
   theory/arith/theory_arith_type_rules.h
   theory/arith/type_enumerator.h
+  theory/arrays/aext_solver.cpp
+  theory/arrays/aext_solver.h
   theory/arrays/array_info.cpp
   theory/arrays/array_info.h
   theory/arrays/inference_manager.cpp
