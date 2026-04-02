@@ -855,6 +855,9 @@ void TheoryArrays::preRegisterTermInternal(TNode node)
         // AEXT solver: register store, skip eager lemma generation.
         // RIntro1 is handled by the AEXT solver.
         d_aextSolver->preRegisterStore(node);
+        // Maintain inStore info for computeRelevantTerms (model
+        // construction needs to trace reads through parent stores).
+        d_infoMap.addInStore(a, node);
         break;
       }
 
@@ -1228,6 +1231,43 @@ bool TheoryArrays::collectModelValues(TheoryModel* m,
     if (n.getKind() == Kind::SELECT)
     {
       selects[d_equalityEngine->getRepresentative(n[0])].push_back(n);
+    }
+  }
+
+  // For the AEXT solver: propagate reads down through store chains.
+  // The AEXT solver does not create explicit select(base, i) terms via Row
+  // lemmas, so the model builder needs to trace reads through stores to
+  // ensure base arrays get the right values.
+  if (useAextSolver())
+  {
+    for (set<Node>::iterator si = termSet.begin(); si != termSet.end(); ++si)
+    {
+      Node n = *si;
+      if (n.getKind() != Kind::SELECT)
+      {
+        continue;
+      }
+      // Walk down the store chain from n[0], propagating this read
+      // to each base array where the index passes through.
+      TNode idx = n[1];
+      TNode arr = n[0];
+      while (arr.getKind() == Kind::STORE)
+      {
+        if (!d_equalityEngine->areEqual(idx, arr[1]))
+        {
+          // Read index differs from store index: read passes through
+          // to the base array arr[0].
+          TNode baseRep = d_equalityEngine->getRepresentative(arr[0]);
+          selects[baseRep].push_back(n);
+        }
+        else
+        {
+          // Read index matches store index: value comes from the
+          // store, no need to propagate further down.
+          break;
+        }
+        arr = arr[0];
+      }
     }
   }
 
