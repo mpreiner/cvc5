@@ -115,6 +115,7 @@ void AextArraySolver::check(Theory::Effort level)
   // Clear per-check data structures
   d_checkAccessCache.clear();
   d_arrayModels.clear();
+  d_propEdgeMaps.clear();
 
   // Build the parent store map for RowU propagation.
   buildParentMap();
@@ -170,35 +171,25 @@ void AextArraySolver::checkAccess(TNode select)
   TNode indexRep = d_ee->getRepresentative(index);
   NodeManager* nm = nodeManager();
 
-  // Traversal uses EE representatives as "model values" (like Bitwuzla
-  // uses BV model values). Two indices are "equal" iff they have the same
-  // representative. This eliminates the "unknown" case and provides a
-  // complete partition, just like concrete model values.
-  struct VisitEntry
-  {
-    TNode array;
-    std::vector<Node> pathConds;
-  };
-  std::vector<VisitEntry> visit;
-  // If the EE has merged select[0] with other arrays, the representative
-  // may differ from select[0]. Include the array equality as a starting
-  // path condition to guard any lemmas that depend on this merge.
-  std::vector<Node> startConds;
+  // Propagation edge map for this select — records how each arrayRep
+  // was reached, for lazy path condition reconstruction.
+  PropEdgeMap& edgeMap = d_propEdgeMaps[select];
+
+  // Lightweight visit stack: just the array node, no path conditions.
+  std::vector<TNode> visit;
   TNode startRep = d_ee->getRepresentative(select[0]);
-  if (select[0] != startRep)
-  {
-    startConds.push_back(select[0].eqNode(startRep));
-  }
-  visit.push_back({select[0], std::move(startConds)});
+  // Record start node (no predecessor edge).
+  edgeMap[startRep] = {select[0], TNode(), TNode(), false};
+  visit.push_back(select[0]);
 
   std::unordered_set<TNode> visited;
 
   while (!visit.empty() && !d_state.isInConflict())
   {
-    VisitEntry entry = std::move(visit.back());
+    TNode array = visit.back();
     visit.pop_back();
 
-    TNode arrayRep = d_ee->getRepresentative(entry.array);
+    TNode arrayRep = d_ee->getRepresentative(array);
     if (!visited.insert(arrayRep).second)
     {
       continue;
@@ -215,16 +206,14 @@ void AextArraySolver::checkAccess(TNode select)
         // at the same index. Check if their values differ.
         if (!d_ee->areEqual(select, existing.select))
         {
-          // The explanation is the conjunction of path conditions from
-          // both reads (which justify how each read reached this array)
-          // plus the index equality (if syntactically different).
           Node conc = select.eqNode(existing.select);
+          // Reconstruct path conditions from both reads.
           std::vector<Node> expVec;
-          expVec.insert(
-              expVec.end(), entry.pathConds.begin(), entry.pathConds.end());
-          expVec.insert(expVec.end(),
-                        existing.pathConds.begin(),
-                        existing.pathConds.end());
+          collectPathConditions(select, arrayRep, edgeMap, expVec);
+          collectPathConditions(existing.select,
+                                arrayRep,
+                                d_propEdgeMaps[existing.select],
+                                expVec);
           if (index != existing.index)
           {
             expVec.push_back(index.eqNode(existing.index));
@@ -243,11 +232,10 @@ void AextArraySolver::checkAccess(TNode select)
         }
         continue;
       }
-      model[indexRep] = {select, index, entry.pathConds};
+      model[indexRep] = {select, index};
     }
 
     // Step 2: Check for AccessStore (matching index by representative).
-    bool foundMatch = false;
     eq::EqClassIterator eqi(arrayRep, d_ee);
     while (!eqi.isFinished())
     {
@@ -262,10 +250,9 @@ void AextArraySolver::checkAccess(TNode select)
           if (!d_ee->areEqual(select, n[2]))
           {
             Node conc = select.eqNode(n[2]);
-            // Explanation: path conditions plus index equality, and
-            // array equality if the store was brought in by an EE merge
-            // (not structurally present at the propagation target).
-            std::vector<Node> expVec(entry.pathConds);
+            // Reconstruct path conditions to this rep.
+            std::vector<Node> expVec;
+            collectPathConditions(select, arrayRep, edgeMap, expVec);
             if (index != n[1])
             {
               expVec.push_back(index.eqNode(n[1]));
@@ -274,22 +261,21 @@ void AextArraySolver::checkAccess(TNode select)
             // read was propagated to) differs from the store (meaning
             // the store was brought in by an EE merge within this
             // equivalence class).
-            if (entry.array != n)
+            TNode entryArray = edgeMap[arrayRep].entryArray;
+            if (entryArray != n)
             {
-              expVec.push_back(entry.array.eqNode(static_cast<Node>(n)));
+              expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
             }
             Node reason = nm->mkAnd(expVec);
             Trace("arrays::aext")
-                << "AccessStore: entry.array=" << entry.array
-                << " store=" << n << " reason=" << reason << " => " << conc
-                << std::endl;
+                << "AccessStore: entryArray=" << entryArray << " store=" << n
+                << " reason=" << reason << " => " << conc << std::endl;
             d_im.arrayLemma(conc,
                             InferenceId::ARRAYS_AEXT_ROW,
                             reason,
                             ProofRule::ARRAYS_READ_OVER_WRITE);
             ++d_numAccessStoreLemmas;
           }
-          foundMatch = true;
           break;
         }
       }
@@ -301,6 +287,7 @@ void AextArraySolver::checkAccess(TNode select)
     // store, propagate through OTHER stores in the same EQ class (they
     // may be from a different store chain brought in by an equality).
     {
+      TNode entryArray = edgeMap[arrayRep].entryArray;
       eq::EqClassIterator eqi2(arrayRep, d_ee);
       while (!eqi2.isFinished())
       {
@@ -309,7 +296,6 @@ void AextArraySolver::checkAccess(TNode select)
             && d_ee->getRepresentative(n[1]) != indexRep)
         {
           // Representatives differ → pass through (RowD).
-          // Add i != j as path condition guard.
           // Also generate a splitting lemma if the EE doesn't know
           // the disequality, so the SAT solver considers both cases.
           if (!d_ee->areDisequal(index, n[1], false))
@@ -325,18 +311,14 @@ void AextArraySolver::checkAccess(TNode select)
                          InferenceId::ARRAYS_AEXT_ROW);
             }
           }
-          std::vector<Node> newConds(entry.pathConds);
-          // Guard with array equality if the store was brought in by
-          // an EE merge (not structurally entry.array itself).
-          if (entry.array != n)
+          TNode childRep = d_ee->getRepresentative(n[0]);
+          if (visited.find(childRep) == visited.end()
+              && edgeMap.find(childRep) == edgeMap.end())
           {
-            newConds.push_back(entry.array.eqNode(n));
+            edgeMap[childRep] = {n[0], n, arrayRep, false};
+            Trace("arrays::aext") << "  RowD push: " << n[0] << std::endl;
+            visit.push_back(n[0]);
           }
-          newConds.push_back(index.eqNode(n[1]).notNode());
-          Trace("arrays::aext")
-              << "  RowD push: " << n[0] << " conds=" << newConds.size()
-              << std::endl;
-          visit.push_back({n[0], std::move(newConds)});
         }
         ++eqi2;
       }
@@ -346,6 +328,7 @@ void AextArraySolver::checkAccess(TNode select)
     // whose base is in this EQ class, when the store index has a
     // different representative from the read index.
     {
+      TNode entryArray = edgeMap[arrayRep].entryArray;
       auto pit = d_parentStores.find(arrayRep);
       if (pit != d_parentStores.end())
       {
@@ -367,22 +350,79 @@ void AextArraySolver::checkAccess(TNode select)
                            InferenceId::ARRAYS_AEXT_ROW);
               }
             }
-            std::vector<Node> newConds(entry.pathConds);
-            // Guard with array equality if the parent store's base
-            // was brought in by an EE merge (not structurally entry.array).
-            if (entry.array != store[0])
+            TNode storeRep = d_ee->getRepresentative(store);
+            if (visited.find(storeRep) == visited.end()
+                && edgeMap.find(storeRep) == edgeMap.end())
             {
-              newConds.push_back(entry.array.eqNode(store[0]));
+              edgeMap[storeRep] = {store, store, arrayRep, true};
+              Trace("arrays::aext") << "  RowU push: " << store << std::endl;
+              visit.push_back(store);
             }
-            newConds.push_back(index.eqNode(store[1]).notNode());
-            Trace("arrays::aext")
-                << "  RowU push: " << store << " conds=" << newConds.size()
-                << std::endl;
-            visit.push_back({store, std::move(newConds)});
           }
         }
       }
     }
+  }
+}
+
+void AextArraySolver::collectPathConditions(TNode select,
+                                            TNode conflictRep,
+                                            const PropEdgeMap& edgeMap,
+                                            std::vector<Node>& conds)
+{
+  TNode index = select[1];
+
+  // Walk back from conflictRep to the start of the propagation.
+  TNode cur = conflictRep;
+  while (true)
+  {
+    auto it = edgeMap.find(cur);
+    Assert(it != edgeMap.end());
+    const PropEdge& edge = it->second;
+
+    if (edge.store.isNull())
+    {
+      // Start node — add initial EE merge guard if needed.
+      if (edge.entryArray != cur)
+      {
+        conds.push_back(edge.entryArray.eqNode(static_cast<Node>(cur)));
+      }
+      break;
+    }
+
+    // Guard for EE merge between the pushed array and its representative.
+    // E.g., RowU pushes store(a,i,v) but its rep is some other term R;
+    // we need the guard store(a,i,v) = R.
+    if (edge.entryArray != cur)
+    {
+      conds.push_back(edge.entryArray.eqNode(static_cast<Node>(cur)));
+    }
+
+    // Look up the entry array at the source rep (prevEntry).
+    auto pit = edgeMap.find(edge.fromRep);
+    Assert(pit != edgeMap.end());
+    TNode prevEntry = pit->second.entryArray;
+
+    if (edge.isRowU)
+    {
+      // RowU: we pushed the store itself; guard is prevEntry = store[0]
+      if (prevEntry != edge.store[0])
+      {
+        conds.push_back(prevEntry.eqNode(edge.store[0]));
+      }
+    }
+    else
+    {
+      // RowD: we pushed store[0]; guard is prevEntry = store
+      if (prevEntry != edge.store)
+      {
+        conds.push_back(prevEntry.eqNode(static_cast<Node>(edge.store)));
+      }
+    }
+    // Index disequality condition for passing through this store.
+    conds.push_back(index.eqNode(edge.store[1]).notNode());
+
+    cur = edge.fromRep;
   }
 }
 

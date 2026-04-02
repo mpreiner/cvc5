@@ -25,6 +25,11 @@
  * guarded by path conditions (index disequalities accumulated along the
  * propagation path).
  *
+ * Path conditions are reconstructed lazily: during propagation, only
+ * lightweight predecessor edges are recorded.  When a conflict is detected,
+ * the path is walked backwards to extract the actual conditions.  This avoids
+ * O(depth^2) vector copying during propagation (following Bitwuzla's approach).
+ *
  * Calculus rules implemented (from the AEXT paper, Figures 1-2):
  *   InitR/InitW  - register reads and virtual writes
  *   RowD/RowU    - propagate reads down/up through stores
@@ -120,16 +125,30 @@ class AextArraySolver : protected EnvObj
 
  private:
   /**
+   * A predecessor edge in the propagation graph.  Records how we reached
+   * a given array representative during checkAccess().  Used for lazy
+   * path condition reconstruction when a conflict is detected.
+   */
+  struct PropEdge
+  {
+    TNode entryArray; /**< concrete array pushed to reach this rep */
+    TNode store;      /**< store passed through (null for start node) */
+    TNode fromRep;    /**< source arrayRep (null for start node) */
+    bool isRowU;      /**< true if this edge is RowU (upward) */
+  };
+
+  /** Per-select propagation info: maps arrayRep to the edge that reached it */
+  typedef std::unordered_map<TNode, PropEdge> PropEdgeMap;
+
+  /**
    * A read that has been propagated to a specific array during check().
-   * Tracks the original select term and the path conditions accumulated
-   * along the propagation path.
+   * Path conditions are not stored eagerly; they are reconstructed on
+   * demand from d_propEdgeMaps when a conflict is detected.
    */
   struct PropagatedRead
   {
-    TNode select;                   /**< the original SELECT term */
-    TNode index;                    /**< the read index */
-    std::vector<Node> pathConds;    /**< accumulated path conditions */
-    bool fromRowU;                  /**< arrived via RowU propagation */
+    TNode select; /**< the original SELECT term */
+    TNode index;  /**< the read index */
   };
 
   //--------------------------------- propagation (core AEXT calculus)
@@ -152,6 +171,20 @@ class AextArraySolver : protected EnvObj
    * @param select the select term to propagate
    */
   void checkAccess(TNode select);
+  /**
+   * Reconstruct path conditions by walking the predecessor edge chain
+   * from conflictRep back to the start of the propagation for the given
+   * select.  Appends conditions to conds.
+   *
+   * @param select the select whose propagation path to reconstruct
+   * @param conflictRep the arrayRep where the conflict was detected
+   * @param edgeMap the PropEdgeMap for this select
+   * @param conds output vector for path conditions
+   */
+  void collectPathConditions(TNode select,
+                             TNode conflictRep,
+                             const PropEdgeMap& edgeMap,
+                             std::vector<Node>& conds);
   /**
    * Process array disequalities (DisEq rule).
    * For each disequality a != b, creates a witness index k and generates:
@@ -181,7 +214,7 @@ class AextArraySolver : protected EnvObj
   context::CDList<Node> d_arrayDisequalities;
   /** Disequalities for which a witness has already been generated */
   NodeSet d_witnessDiseqs;
-  /** Lemma deduplication cache (user-context-dependent) */
+  /** Lemma deduplication cache (context-dependent) */
   NodeSet d_lemmaCache;
 
   //--------------------------------- per-check data structures
@@ -196,6 +229,13 @@ class AextArraySolver : protected EnvObj
    */
   std::unordered_map<TNode, std::unordered_map<TNode, PropagatedRead>>
       d_arrayModels;
+  /**
+   * Propagation edge maps (rebuilt each check() call).
+   * For each select, maps arrayRep to the PropEdge recording how that
+   * rep was reached during propagation.  Used for lazy path condition
+   * reconstruction when a conflict is detected (CongR or AccessStore).
+   */
+  std::unordered_map<TNode, PropEdgeMap> d_propEdgeMaps;
   /**
    * Parent store map (rebuilt each check() call).
    * Maps array representative -> STORE terms whose base is in that
