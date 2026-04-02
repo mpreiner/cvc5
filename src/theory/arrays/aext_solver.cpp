@@ -315,7 +315,10 @@ void AextArraySolver::checkAccess(TNode select)
           if (!d_ee->areDisequal(index, n[1], false))
           {
             Node split = index.eqNode(n[1]);
-            if (d_lemmaCache.insert(split))
+            // Skip if the rewriter can decide the equality (e.g.,
+            // arithmetic proves i != i+1), as the split would be
+            // trivially true and trigger an assertion in the IM.
+            if (!rewrite(split).isConst() && d_lemmaCache.insert(split))
             {
               Trace("arrays::aext") << "Index split: " << split << std::endl;
               d_im.lemma(split.orNode(split.notNode()),
@@ -354,7 +357,10 @@ void AextArraySolver::checkAccess(TNode select)
             if (!d_ee->areDisequal(index, store[1], false))
             {
               Node split = index.eqNode(store[1]);
-              if (d_lemmaCache.insert(split))
+              // Skip if the rewriter can decide the equality (e.g.,
+              // arithmetic proves i != i+1), as the split would be
+              // trivially true and trigger an assertion in the IM.
+              if (!rewrite(split).isConst() && d_lemmaCache.insert(split))
               {
                 Trace("arrays::aext") << "Index split: " << split << std::endl;
                 d_im.lemma(split.orNode(split.notNode()),
