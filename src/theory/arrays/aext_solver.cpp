@@ -33,7 +33,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_stores(context()),
       d_arrayDisequalities(context()),
       d_witnessDiseqs(context()),
-      d_lemmaCache(userContext()),
+      d_lemmaCache(context()),
       d_numCongruenceLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCongruenceLemmas")),
       d_numAccessStoreLemmas(statisticsRegistry().registerInt(
@@ -270,12 +270,13 @@ void AextArraySolver::checkAccess(TNode select)
             {
               expVec.push_back(index.eqNode(n[1]));
             }
-            // Guard with array equality if the select's original array
-            // is different from the store (the propagation path may rely
-            // on EE merges not captured in path conditions).
-            if (select[0] != n)
+            // Guard with array equality if the entry array (where the
+            // read was propagated to) differs from the store (meaning
+            // the store was brought in by an EE merge within this
+            // equivalence class).
+            if (entry.array != n)
             {
-              expVec.push_back(select[0].eqNode(static_cast<Node>(n)));
+              expVec.push_back(entry.array.eqNode(static_cast<Node>(n)));
             }
             Node reason = nm->mkAnd(expVec);
             Trace("arrays::aext")
@@ -296,15 +297,16 @@ void AextArraySolver::checkAccess(TNode select)
     }
 
     // Step 3: RowD -- propagate downward through stores whose index
-    // has a different representative. No AccessStore match means the
-    // read is not absorbed by any store at this array.
-    if (!foundMatch)
+    // has a different representative. Even if AccessStore matched one
+    // store, propagate through OTHER stores in the same EQ class (they
+    // may be from a different store chain brought in by an equality).
     {
       eq::EqClassIterator eqi2(arrayRep, d_ee);
       while (!eqi2.isFinished())
       {
         TNode n = *eqi2;
-        if (n.getKind() == Kind::STORE)
+        if (n.getKind() == Kind::STORE
+            && d_ee->getRepresentative(n[1]) != indexRep)
         {
           // Representatives differ → pass through (RowD).
           // Add i != j as path condition guard.
@@ -321,6 +323,12 @@ void AextArraySolver::checkAccess(TNode select)
             }
           }
           std::vector<Node> newConds(entry.pathConds);
+          // Guard with array equality if the store was brought in by
+          // an EE merge (not structurally entry.array itself).
+          if (entry.array != n)
+          {
+            newConds.push_back(entry.array.eqNode(n));
+          }
           newConds.push_back(index.eqNode(n[1]).notNode());
           Trace("arrays::aext")
               << "  RowD push: " << n[0] << " conds=" << newConds.size()
@@ -354,6 +362,12 @@ void AextArraySolver::checkAccess(TNode select)
               }
             }
             std::vector<Node> newConds(entry.pathConds);
+            // Guard with array equality if the parent store's base
+            // was brought in by an EE merge (not structurally entry.array).
+            if (entry.array != store[0])
+            {
+              newConds.push_back(entry.array.eqNode(store[0]));
+            }
             newConds.push_back(index.eqNode(store[1]).notNode());
             Trace("arrays::aext")
                 << "  RowU push: " << store << " conds=" << newConds.size()
