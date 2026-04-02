@@ -41,7 +41,11 @@ AextArraySolver::AextArraySolver(Env& env,
       d_numDisequalityLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numDisequalityLemmas")),
       d_numCheckCalls(statisticsRegistry().registerInt(
-          "theory::arrays::aext::numCheckCalls"))
+          "theory::arrays::aext::numCheckCalls")),
+      d_numPropagationsDown(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numPropagationsDown")),
+      d_numPropagationsUp(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numPropagationsUp"))
 {
 }
 
@@ -318,6 +322,7 @@ void AextArraySolver::checkAccess(TNode select)
             edgeMap[childRep] = {n[0], n, arrayRep, false};
             Trace("arrays::aext") << "  RowD push: " << n[0] << std::endl;
             visit.push_back(n[0]);
+            ++d_numPropagationsDown;
           }
         }
         ++eqi2;
@@ -357,6 +362,7 @@ void AextArraySolver::checkAccess(TNode select)
               edgeMap[storeRep] = {store, store, arrayRep, true};
               Trace("arrays::aext") << "  RowU push: " << store << std::endl;
               visit.push_back(store);
+              ++d_numPropagationsUp;
             }
           }
         }
