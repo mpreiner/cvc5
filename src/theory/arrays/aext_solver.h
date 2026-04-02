@@ -253,6 +253,10 @@ class AextArraySolver : protected EnvObj
   IntStat d_numDisequalityLemmas;
   /** Number of check() calls */
   IntStat d_numCheckCalls;
+  /** Number of downward propagation steps (RowD) */
+  IntStat d_numPropagationsDown;
+  /** Number of upward propagation steps (RowU) */
+  IntStat d_numPropagationsUp;
   //--------------------------------- end statistics
 };
 
