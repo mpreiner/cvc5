@@ -125,22 +125,6 @@ class AextArraySolver : protected EnvObj
 
  private:
   /**
-   * A predecessor edge in the propagation graph.  Records how we reached
-   * a given array representative during checkAccess().  Used for lazy
-   * path condition reconstruction when a conflict is detected.
-   */
-  struct PropEdge
-  {
-    TNode entryArray; /**< concrete array pushed to reach this rep */
-    TNode store;      /**< store passed through (null for start node) */
-    TNode fromRep;    /**< source arrayRep (null for start node) */
-    bool isRowU;      /**< true if this edge is RowU (upward) */
-  };
-
-  /** Per-select propagation info: maps arrayRep to the edge that reached it */
-  typedef std::unordered_map<TNode, PropEdge> PropEdgeMap;
-
-  /**
    * A read that has been propagated to a specific array during check().
    * Path conditions are not stored eagerly; they are reconstructed on
    * demand from d_propEdgeMaps when a conflict is detected.
@@ -172,19 +156,22 @@ class AextArraySolver : protected EnvObj
    */
   void checkAccess(TNode select);
   /**
-   * Reconstruct path conditions by walking the predecessor edge chain
-   * from conflictRep back to the start of the propagation for the given
-   * select.  Appends conditions to conds.
+   * Find a path from a select's starting array to a target array
+   * representative through the store graph (RowD/RowU edges), and
+   * extract the path conditions.  Uses BFS for shortest path.
    *
-   * @param select the select whose propagation path to reconstruct
-   * @param conflictRep the arrayRep where the conflict was detected
-   * @param edgeMap the PropEdgeMap for this select
+   * This is called on-demand when a conflict is detected (CongR,
+   * AccessStore, or AccessConstArray), avoiding the need to pre-record
+   * predecessor edges during propagation.
+   *
+   * @param select the select term whose path to reconstruct
+   * @param targetRep the target array representative
    * @param conds output vector for path conditions
+   * @return the entry array at targetRep (the specific node reached)
    */
-  void collectPathConditions(TNode select,
-                             TNode conflictRep,
-                             const PropEdgeMap& edgeMap,
-                             std::vector<Node>& conds);
+  TNode findPathConditions(TNode select,
+                           TNode targetRep,
+                           std::vector<Node>& conds);
   /**
    * Process array disequalities (DisEq rule).
    * For each disequality a != b, creates a witness index k and generates:
@@ -229,13 +216,6 @@ class AextArraySolver : protected EnvObj
    */
   std::unordered_map<TNode, std::unordered_map<TNode, PropagatedRead>>
       d_arrayModels;
-  /**
-   * Propagation edge maps (rebuilt each check() call).
-   * For each select, maps arrayRep to the PropEdge recording how that
-   * rep was reached during propagation.  Used for lazy path condition
-   * reconstruction when a conflict is detected (CongR or AccessStore).
-   */
-  std::unordered_map<TNode, PropEdgeMap> d_propEdgeMaps;
   /**
    * Parent store map (rebuilt each check() call).
    * Maps array representative -> STORE terms whose base is in that
