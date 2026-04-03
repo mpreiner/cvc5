@@ -368,11 +368,11 @@ void AextArraySolver::checkAccess(TNode select)
       }
     }
 
-    // Step 4: RowU -- always propagate upward through parent stores
-    // whose base is in this EQ class, when the store index has a
-    // different representative from the read index.
+    // Step 4: RowU -- propagate upward through parent stores of the
+    // entry array node.  Skip if another select already did RowU from
+    // this arrayRep — all parents were already pushed, and CongR in
+    // Step 1 handles index-specific conflicts.
     {
-      TNode entryArray = edgeMap[arrayRep].entryArray;
       auto pit = d_parentStores.find(arrayRep);
       if (pit != d_parentStores.end())
       {
@@ -384,9 +384,6 @@ void AextArraySolver::checkAccess(TNode select)
             if (!d_ee->areDisequal(index, store[1], false))
             {
               Node split = index.eqNode(store[1]);
-              // Skip if the rewriter can decide the equality (e.g.,
-              // arithmetic proves i != i+1), as the split would be
-              // trivially true and trigger an assertion in the IM.
               if (!rewrite(split).isConst() && d_lemmaCache.insert(split))
               {
                 Trace("arrays::aext") << "Index split: " << split << std::endl;
