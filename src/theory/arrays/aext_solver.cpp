@@ -12,6 +12,7 @@
 
 #include "theory/arrays/aext_solver.h"
 
+#include "expr/array_store_all.h"
 #include "expr/node_manager.h"
 #include "theory/arrays/skolem_cache.h"
 #include "theory/theory_model.h"
@@ -40,6 +41,8 @@ AextArraySolver::AextArraySolver(Env& env,
           "theory::arrays::aext::numAccessStoreLemmas")),
       d_numDisequalityLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numDisequalityLemmas")),
+      d_numConstArrayLemmas(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numConstArrayLemmas")),
       d_numCheckCalls(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCheckCalls")),
       d_numPropagationsDown(statisticsRegistry().registerInt(
@@ -284,6 +287,42 @@ void AextArraySolver::checkAccess(TNode select)
         }
       }
       ++eqi;
+    }
+
+    // Step 2b: Check for AccessConstArray (STORE_ALL in EQ class).
+    // When a read reaches a constant array, assert sel = defaultValue.
+    {
+      eq::EqClassIterator eqca(arrayRep, d_ee);
+      while (!eqca.isFinished())
+      {
+        TNode n = *eqca;
+        if (n.getKind() == Kind::STORE_ALL)
+        {
+          ArrayStoreAll storeAll = n.getConst<ArrayStoreAll>();
+          Node defValue = storeAll.getValue();
+          if (!d_ee->hasTerm(defValue) || !d_ee->areEqual(select, defValue))
+          {
+            Node conc = select.eqNode(defValue);
+            std::vector<Node> expVec;
+            collectPathConditions(select, arrayRep, edgeMap, expVec);
+            TNode entryArray = edgeMap[arrayRep].entryArray;
+            if (entryArray != n)
+            {
+              expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
+            }
+            Node reason = nm->mkAnd(expVec);
+            Trace("arrays::aext") << "AccessConstArray: " << reason << " => "
+                                  << conc << std::endl;
+            d_im.arrayLemma(conc,
+                            InferenceId::ARRAYS_CONST_ARRAY_DEFAULT,
+                            reason,
+                            ProofRule::TRUST);
+            ++d_numConstArrayLemmas;
+          }
+          break;
+        }
+        ++eqca;
+      }
     }
 
     // Step 3: RowD -- propagate downward through stores whose index

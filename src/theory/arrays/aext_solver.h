@@ -251,6 +251,8 @@ class AextArraySolver : protected EnvObj
   IntStat d_numAccessStoreLemmas;
   /** Number of disequality witness lemmas (DisEq) */
   IntStat d_numDisequalityLemmas;
+  /** Number of constant array lemmas (Roc) */
+  IntStat d_numConstArrayLemmas;
   /** Number of check() calls */
   IntStat d_numCheckCalls;
   /** Number of downward propagation steps (RowD) */

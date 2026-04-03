@@ -49,9 +49,11 @@ IllegalChecker::IllegalChecker(Env& e)
   // Note that we don't guard against HO_APPLY, since it can naturally be
   // handled in proofs.
 
-  // Array constants are not supported unless arraysExp is enabled
+  // Array constants are not supported unless arraysExp is enabled or the
+  // AEXT solver is active (which handles STORE_ALL natively).
   if (logicInfo().isTheoryEnabled(theory::THEORY_ARRAYS)
-      && !options().arrays.arraysExp)
+      && !options().arrays.arraysExp
+      && options().arrays.arraysSolver != options::ArraysSolverMode::AEXT)
   {
     d_illegalKinds.insert(Kind::STORE_ALL);
   }
