@@ -335,7 +335,11 @@ TrustNode TheoryArrays::ppRewrite(TNode term,
   Kind k = term.getKind();
   if (!options().arrays.arraysExp)
   {
-    if (k == Kind::EQ_RANGE || k == Kind::STORE_ALL)
+    // The AEXT solver handles STORE_ALL natively (non-extensional only).
+    if (k == Kind::EQ_RANGE
+        || (k == Kind::STORE_ALL
+            && options().arrays.arraysSolver
+                   != options::ArraysSolverMode::AEXT))
     {
       std::stringstream ss;
       ss << "Term of kind `" << k
@@ -1237,7 +1241,9 @@ bool TheoryArrays::collectModelValues(TheoryModel* m,
   // For the AEXT solver: propagate reads down through store chains.
   // The AEXT solver does not create explicit select(base, i) terms via Row
   // lemmas, so the model builder needs to trace reads through stores to
-  // ensure base arrays get the right values.
+  // ensure base arrays get the right values.  We follow both syntactic
+  // store children and EE merges (stores from other chains in the same
+  // equivalence class).
   if (useAextSolver())
   {
     for (set<Node>::iterator si = termSet.begin(); si != termSet.end(); ++si)
@@ -1247,26 +1253,37 @@ bool TheoryArrays::collectModelValues(TheoryModel* m,
       {
         continue;
       }
-      // Walk down the store chain from n[0], propagating this read
-      // to each base array where the index passes through.
       TNode idx = n[1];
-      TNode arr = n[0];
-      while (arr.getKind() == Kind::STORE)
+      // Walk through array reps, following store chains and EE merges.
+      std::vector<TNode> visit;
+      std::unordered_set<TNode> visited;
+      visit.push_back(d_equalityEngine->getRepresentative(n[0]));
+      while (!visit.empty())
       {
-        if (!d_equalityEngine->areEqual(idx, arr[1]))
+        TNode arrRep = visit.back();
+        visit.pop_back();
+        if (!visited.insert(arrRep).second)
         {
-          // Read index differs from store index: read passes through
-          // to the base array arr[0].
-          TNode baseRep = d_equalityEngine->getRepresentative(arr[0]);
-          selects[baseRep].push_back(n);
+          continue;
         }
-        else
+        // Iterate all terms in this EQ class to find stores.
+        eq::EqClassIterator eci(arrRep, d_equalityEngine);
+        for (; !eci.isFinished(); ++eci)
         {
-          // Read index matches store index: value comes from the
-          // store, no need to propagate further down.
-          break;
+          TNode t = *eci;
+          if (t.getKind() == Kind::STORE)
+          {
+            if (!d_equalityEngine->areEqual(idx, t[1]))
+            {
+              // Read passes through this store to t[0].
+              TNode baseRep = d_equalityEngine->getRepresentative(t[0]);
+              selects[baseRep].push_back(n);
+              visit.push_back(baseRep);
+            }
+            // If indices match, the value comes from t[2]; don't
+            // propagate further through this particular store.
+          }
         }
-        arr = arr[0];
       }
     }
   }
