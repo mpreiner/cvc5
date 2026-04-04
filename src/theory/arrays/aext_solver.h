@@ -208,6 +208,14 @@ class AextArraySolver : protected EnvObj
   /** Cache of selects already processed in current check() call */
   std::unordered_set<Node> d_checkAccessCache;
   /**
+   * Index representatives of non-virtual reads (rebuilt each check).
+   * Used to decide whether virtual reads can skip RowU: if a non-virtual
+   * read shares the same indexRep, the non-virtual read may be blocked
+   * at the virtual read's store (RowU not pushed when indices match),
+   * so the virtual read must propagate upward on its behalf.
+   */
+  std::unordered_set<TNode> d_nonVirtualIndexReps;
+  /**
    * Array models (rebuilt each check() call).
    * For each array representative, maps index representative to the
    * PropagatedRead that reached it. Used for congruence detection:
