@@ -122,6 +122,7 @@ void AextArraySolver::check(Theory::Effort level)
                          << std::endl;
 
   // Clear per-check data structures
+  d_carePairs.clear();
   d_checkAccessCache.clear();
   d_arrayModels.clear();
 
@@ -354,19 +355,15 @@ void AextArraySolver::checkAccess(TNode select)
             && d_ee->getRepresentative(n[1]) != indexRep)
         {
           // Representatives differ → pass through (RowD).
-          // Also generate a splitting lemma if the EE doesn't know
-          // the disequality, so the SAT solver considers both cases.
+          // Record the undecided pair so that computeCareGraph() can
+          // request a split via the theory combination layer.
           if (!d_ee->areDisequal(index, n[1], false))
           {
             Node split = index.eqNode(n[1]);
-            // Skip if the rewriter can decide the equality (e.g.,
-            // arithmetic proves i != i+1), as the split would be
-            // trivially true and trigger an assertion in the IM.
             if (!rewrite(split).isConst() && d_lemmaCache.insert(split))
             {
-              Trace("arrays::aext") << "Index split: " << split << std::endl;
-              d_im.lemma(split.orNode(split.notNode()),
-                         InferenceId::ARRAYS_AEXT_ROW);
+              Trace("arrays::aext") << "Care pair: " << split << std::endl;
+              d_carePairs.emplace_back(index, n[1]);
             }
           }
           TNode childRep = d_ee->getRepresentative(n[0]);
@@ -405,9 +402,8 @@ void AextArraySolver::checkAccess(TNode select)
               Node split = index.eqNode(store[1]);
               if (!rewrite(split).isConst() && d_lemmaCache.insert(split))
               {
-                Trace("arrays::aext") << "Index split: " << split << std::endl;
-                d_im.lemma(split.orNode(split.notNode()),
-                           InferenceId::ARRAYS_AEXT_ROW);
+                Trace("arrays::aext") << "Care pair: " << split << std::endl;
+                d_carePairs.emplace_back(index, store[1]);
               }
             }
             TNode storeRep = d_ee->getRepresentative(store);
@@ -617,6 +613,12 @@ bool AextArraySolver::collectModelValues(TheoryModel* /*m*/,
                                          const std::set<Node>& /*termSet*/)
 {
   return true;
+}
+
+const std::vector<std::pair<TNode, TNode>>& AextArraySolver::getCarePairs()
+    const
+{
+  return d_carePairs;
 }
 
 }  // namespace arrays
