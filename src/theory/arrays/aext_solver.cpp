@@ -122,7 +122,8 @@ void AextArraySolver::check(Theory::Effort level)
                          << std::endl;
 
   // Clear per-check data structures
-  d_carePairs.clear();
+  d_pendingSplits.clear();
+  d_pendingSplitCache.clear();
   d_checkAccessCache.clear();
   d_arrayModels.clear();
 
@@ -161,6 +162,47 @@ void AextArraySolver::check(Theory::Effort level)
   if (!d_state.isInConflict())
   {
     checkDisequalities();
+  }
+
+  // Send pending index splits.  Use model-based filtering: splits where
+  // the indices have different equality status in the current SAT model
+  // are deferred (they will be retried on future check() calls since
+  // d_pendingSplitCache is per-check, not context-dependent).
+  if (!d_state.isInConflict())
+  {
+    Valuation& val = d_state.getValuation();
+    for (const auto& [t1, t2] : d_pendingSplits)
+    {
+      if (d_state.isInConflict())
+      {
+        break;
+      }
+      // Skip if already decided by the EE during this check.
+      if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
+      {
+        continue;
+      }
+      // Filter by model equality status when available.
+      if (d_ee->isTriggerTerm(t1, THEORY_ARRAYS)
+          && d_ee->isTriggerTerm(t2, THEORY_ARRAYS))
+      {
+        Node s1 = d_ee->getTriggerTermRepresentative(t1, THEORY_ARRAYS);
+        Node s2 = d_ee->getTriggerTermRepresentative(t2, THEORY_ARRAYS);
+        EqualityStatus eqStatus = val.getEqualityStatus(s1, s2);
+        if (eqStatus == EQUALITY_FALSE
+            || eqStatus == EQUALITY_FALSE_AND_PROPAGATED
+            || eqStatus == EQUALITY_FALSE_IN_MODEL)
+        {
+          continue;
+        }
+      }
+      Node split = t1.eqNode(t2);
+      if (d_lemmaCache.insert(split))
+      {
+        Trace("arrays::aext") << "Index split: " << split << std::endl;
+        d_im.lemma(split.orNode(split.notNode()), InferenceId::ARRAYS_AEXT_ROW);
+      }
+    }
   }
 
   Trace("arrays::aext") << "AextArraySolver::check() done" << std::endl;
@@ -355,15 +397,15 @@ void AextArraySolver::checkAccess(TNode select)
             && d_ee->getRepresentative(n[1]) != indexRep)
         {
           // Representatives differ → pass through (RowD).
-          // Record the undecided pair so that computeCareGraph() can
-          // request a split via the theory combination layer.
+          // Record the pending split so the SAT solver can decide
+          // whether the indices are actually equal.
           if (!d_ee->areDisequal(index, n[1], false))
           {
             Node split = index.eqNode(n[1]);
-            if (!rewrite(split).isConst() && d_lemmaCache.insert(split))
+            if (!rewrite(split).isConst()
+                && d_pendingSplitCache.insert(split).second)
             {
-              Trace("arrays::aext") << "Care pair: " << split << std::endl;
-              d_carePairs.emplace_back(index, n[1]);
+              d_pendingSplits.emplace_back(index, n[1]);
             }
           }
           TNode childRep = d_ee->getRepresentative(n[0]);
@@ -400,10 +442,10 @@ void AextArraySolver::checkAccess(TNode select)
             if (!d_ee->areDisequal(index, store[1], false))
             {
               Node split = index.eqNode(store[1]);
-              if (!rewrite(split).isConst() && d_lemmaCache.insert(split))
+              if (!rewrite(split).isConst()
+                  && d_pendingSplitCache.insert(split).second)
               {
-                Trace("arrays::aext") << "Care pair: " << split << std::endl;
-                d_carePairs.emplace_back(index, store[1]);
+                d_pendingSplits.emplace_back(index, store[1]);
               }
             }
             TNode storeRep = d_ee->getRepresentative(store);
@@ -613,12 +655,6 @@ bool AextArraySolver::collectModelValues(TheoryModel* /*m*/,
                                          const std::set<Node>& /*termSet*/)
 {
   return true;
-}
-
-const std::vector<std::pair<TNode, TNode>>& AextArraySolver::getCarePairs()
-    const
-{
-  return d_carePairs;
 }
 
 }  // namespace arrays
