@@ -976,44 +976,6 @@ void TheoryArrays::checkPair(TNode r1, TNode r2)
 
 void TheoryArrays::computeCareGraph()
 {
-  // AEXT solver: expose undecided index pairs as care pairs so the
-  // theory combination layer sends splitting lemmas.  Filter using the
-  // equality status from the SAT solver's current model (same strategy
-  // as checkPair() in the weak-equiv path): pairs that are disequal in
-  // the model are very likely truly disequal and splitting on them
-  // wastes effort.
-  if (useAextSolver())
-  {
-    for (const auto& [t1, t2] : d_aextSolver->getCarePairs())
-    {
-      // Skip pairs already decided by the EE.
-      if (d_equalityEngine->areEqual(t1, t2)
-          || d_equalityEngine->areDisequal(t1, t2, false))
-      {
-        continue;
-      }
-      // Filter by equality status in the current model, matching the
-      // approach used by checkPair() in the weak-equiv solver.  Only
-      // split on pairs that the SAT solver considers possibly equal.
-      if (d_equalityEngine->isTriggerTerm(t1, THEORY_ARRAYS)
-          && d_equalityEngine->isTriggerTerm(t2, THEORY_ARRAYS))
-      {
-        Node s1 =
-            d_equalityEngine->getTriggerTermRepresentative(t1, THEORY_ARRAYS);
-        Node s2 =
-            d_equalityEngine->getTriggerTermRepresentative(t2, THEORY_ARRAYS);
-        EqualityStatus eqStatus = d_valuation.getEqualityStatus(s1, s2);
-        if (eqStatus == EQUALITY_FALSE
-            || eqStatus == EQUALITY_FALSE_AND_PROPAGATED
-            || eqStatus == EQUALITY_FALSE_IN_MODEL)
-        {
-          continue;
-        }
-      }
-      addCarePair(t1, t2);
-    }
-  }
-
   if (d_sharedArrays.size() > 0) {
     CDNodeSet::key_iterator it1 = d_sharedArrays.key_begin(), it2, iend = d_sharedArrays.key_end();
     for (; it1 != iend; ++it1) {
@@ -1106,7 +1068,6 @@ void TheoryArrays::computeCareGraph()
     d_constReadsContext->pop();
   }
 }
-
 
 /////////////////////////////////////////////////////////////////////////////
 // MODEL GENERATION

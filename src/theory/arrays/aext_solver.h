@@ -123,16 +123,6 @@ class AextArraySolver : protected EnvObj
   bool collectModelValues(TheoryModel* m, const std::set<Node>& termSet);
   //--------------------------------- end model
 
-  //--------------------------------- care graph
-  /**
-   * Return the set of index pairs whose equality is undecided by the EE
-   * and needed for store-chain propagation.  Collected during check() and
-   * consumed by TheoryArrays::computeCareGraph() so that the theory
-   * combination layer sends the splitting lemmas.
-   */
-  const std::vector<std::pair<TNode, TNode>>& getCarePairs() const;
-  //--------------------------------- end care graph
-
  private:
   /**
    * A read that has been propagated to a specific array during check().
@@ -216,13 +206,14 @@ class AextArraySolver : protected EnvObj
 
   //--------------------------------- per-check data structures
   /**
-   * Index pairs whose equality is undecided (collected during check).
-   * Rather than sending splitting lemmas directly, the AEXT solver
-   * accumulates these pairs and exposes them via getCarePairs() so that
-   * TheoryArrays::computeCareGraph() can feed them into the standard
-   * theory combination mechanism.
+   * Index pairs whose equality is undecided, collected during checkAccess().
+   * At the end of check(), these are filtered by model equality status
+   * and sent as splitting lemmas.  Per-check (not context-dependent) so
+   * that deferred splits are retried on subsequent check() calls.
    */
-  std::vector<std::pair<TNode, TNode>> d_carePairs;
+  std::vector<std::pair<TNode, TNode>> d_pendingSplits;
+  /** Deduplication set for d_pendingSplits within a single check() */
+  std::unordered_set<Node> d_pendingSplitCache;
   /** Cache of selects already processed in current check() call */
   std::unordered_set<Node> d_checkAccessCache;
   /**
