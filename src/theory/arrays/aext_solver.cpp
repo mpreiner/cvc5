@@ -37,6 +37,8 @@ AextArraySolver::AextArraySolver(Env& env,
       d_arrayDisequalities(context()),
       d_witnessDiseqs(context()),
       d_lemmaCache(context()),
+      d_numIndexSplitLemmas(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numIndexSplitLemmas")),
       d_numCongruenceLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCongruenceLemmas")),
       d_numAccessStoreLemmas(statisticsRegistry().registerInt(
@@ -200,7 +202,9 @@ void AextArraySolver::check(Theory::Effort level)
       if (d_lemmaCache.insert(split))
       {
         Trace("arrays::aext") << "Index split: " << split << std::endl;
-        d_im.lemma(split.orNode(split.notNode()), InferenceId::ARRAYS_AEXT_ROW);
+        d_im.lemma(split.orNode(split.notNode()),
+                   InferenceId::ARRAYS_AEXT_INDEX_SPLIT);
+        ++d_numIndexSplitLemmas;
       }
     }
   }
@@ -645,8 +649,10 @@ void AextArraySolver::checkDisequalities()
     Node eq = ak.eqNode(bk);
     Trace("arrays::aext") << "DisEq lemma: " << fact << " => " << eq.notNode()
                            << std::endl;
-    d_im.arrayLemma(
-        eq.notNode(), InferenceId::ARRAYS_EXT, fact, ProofRule::ARRAYS_EXT);
+    d_im.arrayLemma(eq.notNode(),
+                    InferenceId::ARRAYS_AEXT_DISEQUALITY,
+                    fact,
+                    ProofRule::ARRAYS_EXT);
     ++d_numDisequalityLemmas;
   }
 }

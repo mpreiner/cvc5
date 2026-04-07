@@ -242,6 +242,8 @@ class AextArraySolver : protected EnvObj
   //--------------------------------- end per-check data structures
 
   //--------------------------------- statistics
+  /** Number of index split lemmas */
+  IntStat d_numIndexSplitLemmas;
   /** Number of congruence lemmas (CongR) */
   IntStat d_numCongruenceLemmas;
   /** Number of access-store lemmas */
