@@ -221,11 +221,13 @@ enum class InferenceId
   // an internally inferred tautological equality
   ARRAYS_EQ_TAUTOLOGY,
   // ---------------------------------- aext array solver
-  // read-over-write lemma from aext solver
+  // index split lemma (i = j OR i != j) from aext solver
+  ARRAYS_AEXT_INDEX_SPLIT,
+  // read-over-write lemma (RowD/RowU propagation) from aext solver
   ARRAYS_AEXT_ROW,
-  // congruence lemma from aext solver
+  // congruence lemma (CongR) from aext solver
   ARRAYS_AEXT_CONGRUENCE,
-  // extensionality witness lemma from aext solver
+  // extensionality witness lemma (DisEq) from aext solver
   ARRAYS_AEXT_DISEQUALITY,
   // ---------------------------------- end arrays theory
 
