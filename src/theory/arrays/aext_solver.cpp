@@ -132,6 +132,9 @@ void AextArraySolver::check(Theory::Effort level)
   // Build the parent store map for RowU propagation.
   buildParentMap();
 
+  // Compute active arrays for RowU gating.
+  computeActiveArrays();
+
   // Propagate all registered selects through store chains.
   for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
   {
@@ -206,6 +209,57 @@ void AextArraySolver::buildParentMap()
     }
     TNode baseRep = d_ee->getRepresentative(store[0]);
     d_parentStores[baseRep].push_back(store);
+  }
+}
+
+void AextArraySolver::computeActiveArrays()
+{
+  d_activeArrays.clear();
+  std::vector<TNode> worklist;
+
+  // Seed: find store reps whose EQ class has > 1 member.
+  std::unordered_set<TNode> checked;
+  for (size_t i = 0, sz = d_stores.size(); i < sz; ++i)
+  {
+    TNode store = d_stores[i];
+    if (!d_ee->hasTerm(store))
+    {
+      continue;
+    }
+    TNode rep = d_ee->getRepresentative(store);
+    if (!checked.insert(rep).second)
+    {
+      continue;
+    }
+
+    eq::EqClassIterator eqi(rep, d_ee);
+    ++eqi;  // skip first
+    if (!eqi.isFinished())
+    {
+      d_activeArrays.insert(rep);
+      worklist.push_back(rep);
+    }
+  }
+
+  // Propagate downward: mark store bases as active.
+  while (!worklist.empty())
+  {
+    TNode rep = worklist.back();
+    worklist.pop_back();
+    eq::EqClassIterator eqi(rep, d_ee);
+    while (!eqi.isFinished())
+    {
+      TNode n = *eqi;
+      if (n.getKind() == Kind::STORE)
+      {
+        TNode baseRep = d_ee->getRepresentative(n[0]);
+        if (d_activeArrays.insert(baseRep).second)
+        {
+          worklist.push_back(baseRep);
+        }
+      }
+      ++eqi;
+    }
   }
 }
 
@@ -388,6 +442,9 @@ void AextArraySolver::checkAccess(TNode select)
     }
 
     // Step 4: RowU -- propagate upward through parent stores.
+    // Only propagate if this array rep is active (reachable from an
+    // equality chain). Without equalities, RowD alone suffices.
+    if (d_activeArrays.count(arrayRep))
     {
       auto pit = d_parentStores.find(arrayRep);
       if (pit != d_parentStores.end())
