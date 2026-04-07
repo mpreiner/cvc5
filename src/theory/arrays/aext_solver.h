@@ -184,6 +184,8 @@ class AextArraySolver : protected EnvObj
    * (child[0]) is in that equivalence class. Used for RowU propagation.
    */
   void buildParentMap();
+  /** Compute active array representatives for RowU gating. */
+  void computeActiveArrays();
   //--------------------------------- end propagation
 
   /** Reference to the theory state */
@@ -231,6 +233,14 @@ class AextArraySolver : protected EnvObj
    * equivalence class. Used for RowU propagation.
    */
   std::unordered_map<TNode, std::vector<TNode>> d_parentStores;
+  /**
+   * Active array representatives for RowU gating (rebuilt each check()).
+   * An array rep is active if its EQ class has size > 1 (meaning an
+   * equality merged it with another term), or if it is transitively
+   * reachable downward through store[0] edges from an active rep.
+   * RowU propagation is only performed from active array reps.
+   */
+  std::unordered_set<TNode> d_activeArrays;
   //--------------------------------- end per-check data structures
 
   //--------------------------------- statistics
