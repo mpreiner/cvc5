@@ -129,24 +129,6 @@ void AextArraySolver::check(Theory::Effort level)
   d_checkAccessCache.clear();
   d_arrayModels.clear();
 
-  // Collect index representatives of non-virtual reads.  Virtual reads
-  // can skip RowU unless their indexRep appears here (meaning an
-  // ext/user read could be blocked at the virtual read's store).
-  d_nonVirtualIndexReps.clear();
-  for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
-  {
-    TNode sel = d_selects[i];
-    if (!d_ee->hasTerm(sel))
-    {
-      continue;
-    }
-    bool isVR = sel[0].getKind() == Kind::STORE && sel[1] == sel[0][1];
-    if (!isVR)
-    {
-      d_nonVirtualIndexReps.insert(d_ee->getRepresentative(sel[1]));
-    }
-  }
-
   // Build the parent store map for RowU propagation.
   buildParentMap();
 
@@ -244,22 +226,11 @@ void AextArraySolver::checkAccess(TNode select)
   TNode indexRep = d_ee->getRepresentative(index);
   NodeManager* nm = nodeManager();
 
-  // A virtual read is select(store(a, i, v), i) — created by preRegisterStore.
-  // Its value is already determined by RIntro1 (= v).  Virtual reads do not
-  // need RowU: any read that could conflict with a virtual read at an ancestor
-  // level will reach the virtual read's own level via its own RowD/RowU
-  // traversal.  Skipping RowU for virtual reads eliminates O(N^2) propagation
-  // on long linear store chains (e.g. storecomm).
-  bool isVirtualRead = select[0].getKind() == Kind::STORE
-                       && select[1] == select[0][1];
-
   // Lightweight visit stack: just the array node, no path conditions
   // or predecessor edges.  Path conditions are reconstructed on demand
   // via findPathConditions() when a conflict is detected.
   std::vector<TNode> visit;
   visit.push_back(select[0]);
-
-  std::unordered_set<TNode> visited;
 
   while (!visit.empty() && !d_state.isInConflict())
   {
@@ -267,10 +238,6 @@ void AextArraySolver::checkAccess(TNode select)
     visit.pop_back();
 
     TNode arrayRep = d_ee->getRepresentative(array);
-    if (!visited.insert(arrayRep).second)
-    {
-      continue;
-    }
 
     // Step 1: Record this read and check for congruence (CongR).
     {
@@ -412,28 +379,15 @@ void AextArraySolver::checkAccess(TNode select)
               d_pendingSplits.emplace_back(index, n[1]);
             }
           }
-          TNode childRep = d_ee->getRepresentative(n[0]);
-          if (visited.find(childRep) == visited.end())
-          {
-            Trace("arrays::aext") << "  RowD push: " << n[0] << std::endl;
-            visit.push_back(n[0]);
-            ++d_numPropagationsDown;
-          }
+          Trace("arrays::aext") << "  RowD push: " << n[0] << std::endl;
+          visit.push_back(n[0]);
+          ++d_numPropagationsDown;
         }
         ++eqi2;
       }
     }
 
     // Step 4: RowU -- propagate upward through parent stores.
-    // Skipped for virtual reads whose indexRep is not shared with any
-    // non-virtual read: in that case, no ext/user read can be blocked
-    // at this store, so the virtual read's upward propagation is
-    // redundant (any conflicting read will reach this level via its own
-    // traversal).  When the indexRep IS shared, the ext/user read may be
-    // blocked here (RowU not pushed when indices match), so the virtual
-    // read must propagate upward on its behalf.
-    if (!isVirtualRead
-        || d_nonVirtualIndexReps.count(indexRep) > 0)
     {
       auto pit = d_parentStores.find(arrayRep);
       if (pit != d_parentStores.end())
@@ -452,13 +406,9 @@ void AextArraySolver::checkAccess(TNode select)
                 d_pendingSplits.emplace_back(index, store[1]);
               }
             }
-            TNode storeRep = d_ee->getRepresentative(store);
-            if (visited.find(storeRep) == visited.end())
-            {
-              Trace("arrays::aext") << "  RowU push: " << store << std::endl;
-              visit.push_back(store);
-              ++d_numPropagationsUp;
-            }
+            Trace("arrays::aext") << "  RowU push: " << store << std::endl;
+            visit.push_back(store);
+            ++d_numPropagationsUp;
           }
         }
       }
