@@ -1122,14 +1122,39 @@ bool TheoryArrays::collectModelValues(TheoryModel* m,
     }
   }
 
-  // For the AEXT solver: propagate reads down through store chains.
-  // The AEXT solver does not create explicit select(base, i) terms via Row
-  // lemmas, so the model builder needs to trace reads through stores to
-  // ensure base arrays get the right values.  We follow both syntactic
-  // store children and EE merges (stores from other chains in the same
-  // equivalence class).
+  // For the AEXT solver: propagate reads through store chains in both
+  // directions.  The AEXT solver does not create explicit select(base, i)
+  // terms via Row lemmas, so the model builder needs to trace reads through
+  // stores to ensure all arrays in a store chain get consistent values.
+  // Downward: a read on store(a, i, v) at index j!=i propagates to a.
+  // Upward: a read on a at index j propagates to store(a, i, v) when j!=i.
   if (useAextSolver())
   {
+    // Precompute map from child array rep to parent store nodes, so we
+    // can propagate reads upward through store chains.
+    std::unordered_map<TNode, std::vector<TNode>> parentStores;
+    {
+      eq::EqClassesIterator eqcs = eq::EqClassesIterator(d_equalityEngine);
+      for (; !eqcs.isFinished(); ++eqcs)
+      {
+        Node eqc = (*eqcs);
+        if (!eqc.getType().isArray())
+        {
+          continue;
+        }
+        eq::EqClassIterator eci(eqc, d_equalityEngine);
+        for (; !eci.isFinished(); ++eci)
+        {
+          TNode t = *eci;
+          if (t.getKind() == Kind::STORE)
+          {
+            TNode childRep = d_equalityEngine->getRepresentative(t[0]);
+            parentStores[childRep].push_back(t);
+          }
+        }
+      }
+    }
+
     for (set<Node>::iterator si = termSet.begin(); si != termSet.end(); ++si)
     {
       Node n = *si;
@@ -1138,7 +1163,8 @@ bool TheoryArrays::collectModelValues(TheoryModel* m,
         continue;
       }
       TNode idx = n[1];
-      // Walk through array reps, following store chains and EE merges.
+      // Walk through array reps, following store chains and EE merges
+      // in both directions.
       std::vector<TNode> visit;
       std::unordered_set<TNode> visited;
       visit.push_back(d_equalityEngine->getRepresentative(n[0]));
@@ -1150,7 +1176,7 @@ bool TheoryArrays::collectModelValues(TheoryModel* m,
         {
           continue;
         }
-        // Iterate all terms in this EQ class to find stores.
+        // Downward: iterate stores in this EQ class, follow to children.
         eq::EqClassIterator eci(arrRep, d_equalityEngine);
         for (; !eci.isFinished(); ++eci)
         {
@@ -1164,8 +1190,21 @@ bool TheoryArrays::collectModelValues(TheoryModel* m,
               selects[baseRep].push_back(n);
               visit.push_back(baseRep);
             }
-            // If indices match, the value comes from t[2]; don't
-            // propagate further through this particular store.
+          }
+        }
+        // Upward: find stores whose child is in this class, propagate
+        // the read to the store's class.
+        auto pit = parentStores.find(arrRep);
+        if (pit != parentStores.end())
+        {
+          for (TNode s : pit->second)
+          {
+            if (!d_equalityEngine->areEqual(idx, s[1]))
+            {
+              TNode storeRep = d_equalityEngine->getRepresentative(s);
+              selects[storeRep].push_back(n);
+              visit.push_back(storeRep);
+            }
           }
         }
       }
