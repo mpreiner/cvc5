@@ -118,6 +118,18 @@ class AextArraySolver : protected EnvObj
   void check(Theory::Effort level);
   //--------------------------------- end main solving
 
+  //--------------------------------- care graph support
+  /**
+   * Return the index pairs whose equality is undecided, collected during
+   * the most recent check() call.  Used by TheoryArrays::computeCareGraph()
+   * to emit care pairs instead of sending explicit split lemmas.
+   */
+  const std::vector<std::pair<TNode, TNode>>& getPendingCarePairs() const
+  {
+    return d_pendingCarePairs;
+  }
+  //--------------------------------- end care graph support
+
   //--------------------------------- model
   /** Collect model values for array terms. */
   bool collectModelValues(TheoryModel* m, const std::set<Node>& termSet);
@@ -209,13 +221,13 @@ class AextArraySolver : protected EnvObj
   //--------------------------------- per-check data structures
   /**
    * Index pairs whose equality is undecided, collected during checkAccess().
-   * At the end of check(), these are filtered by model equality status
-   * and sent as splitting lemmas.  Per-check (not context-dependent) so
-   * that deferred splits are retried on subsequent check() calls.
+   * Used by TheoryArrays::computeCareGraph() to emit care pairs.
+   * Per-check (not context-dependent) so that pairs are recomputed on
+   * each check() call.
    */
-  std::vector<std::pair<TNode, TNode>> d_pendingSplits;
-  /** Deduplication set for d_pendingSplits within a single check() */
-  std::unordered_set<Node> d_pendingSplitCache;
+  std::vector<std::pair<TNode, TNode>> d_pendingCarePairs;
+  /** Deduplication set for d_pendingCarePairs within a single check() */
+  std::unordered_set<Node> d_pendingCarePairCache;
   /** Cache of selects already processed in current check() call */
   std::unordered_set<Node> d_checkAccessCache;
   /**
@@ -244,8 +256,6 @@ class AextArraySolver : protected EnvObj
   //--------------------------------- end per-check data structures
 
   //--------------------------------- statistics
-  /** Number of index split lemmas */
-  IntStat d_numIndexSplitLemmas;
   /** Number of congruence lemmas (CongR) */
   IntStat d_numCongruenceLemmas;
   /** Number of access-store lemmas */
