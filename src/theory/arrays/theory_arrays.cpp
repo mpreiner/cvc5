@@ -1179,73 +1179,44 @@ void TheoryArrays::computeCareGraph()
     d_constReadsContext->pop();
   }
 
-  // For the AEXT solver: also add care pairs for read-index vs store-index
-  // pairs.  The AEXT solver generates conditional RowD lemmas (guarded by
-  // index disequality) but relies on the EE merging the indices for the
-  // complementary AccessStore to fire.  Since the rewriter may transform
-  // the index equality into a different atom, the EE may never learn the
-  // original merge.  Adding these as care pairs ensures the theory
-  // combination framework will split on the equality.
+  // For the AEXT solver: emit care pairs for all undecided index equalities
+  // collected during propagation (RowD/RowU).  This replaces explicit split
+  // lemmas -- the theory combination framework will split on these equalities.
   if (useAextSolver())
   {
-    for (unsigned i = 0, sz = d_reads.size(); i < sz; ++i)
+    for (const auto& [t1, t2] : d_aextSolver->getPendingCarePairs())
     {
-      TNode r = d_reads[i];
-      if (!d_equalityEngine->hasTerm(r))
+      if (d_equalityEngine->areEqual(t1, t2)
+          || d_equalityEngine->areDisequal(t1, t2, false))
       {
         continue;
       }
-      TNode rIdx = r[1];
-      if (!d_equalityEngine->isTriggerTerm(rIdx, THEORY_ARRAYS))
+      if (!d_equalityEngine->isTriggerTerm(t1, THEORY_ARRAYS)
+          || !d_equalityEngine->isTriggerTerm(t2, THEORY_ARRAYS))
       {
         continue;
       }
-      TNode rIdxRep = d_equalityEngine->getRepresentative(rIdx);
-      // Check stores in the same array equivalence class.
-      TNode arrRep = d_equalityEngine->getRepresentative(r[0]);
-      eq::EqClassIterator eci(arrRep, d_equalityEngine);
-      for (; !eci.isFinished(); ++eci)
+      TNode s1 =
+          d_equalityEngine->getTriggerTermRepresentative(t1, THEORY_ARRAYS);
+      TNode s2 =
+          d_equalityEngine->getTriggerTermRepresentative(t2, THEORY_ARRAYS);
+      if (s1 == s2)
       {
-        TNode n = *eci;
-        if (n.getKind() != Kind::STORE)
-        {
-          continue;
-        }
-        TNode sIdx = n[1];
-        if (!d_equalityEngine->isTriggerTerm(sIdx, THEORY_ARRAYS))
-        {
-          continue;
-        }
-        TNode sIdxRep = d_equalityEngine->getRepresentative(sIdx);
-        if (rIdxRep == sIdxRep
-            || d_equalityEngine->areDisequal(rIdx, sIdx, false))
-        {
-          continue;
-        }
-        TNode rShared =
-            d_equalityEngine->getTriggerTermRepresentative(rIdx, THEORY_ARRAYS);
-        TNode sShared =
-            d_equalityEngine->getTriggerTermRepresentative(sIdx, THEORY_ARRAYS);
-        if (rShared == sShared)
-        {
-          continue;
-        }
-        EqualityStatus es = d_valuation.getEqualityStatus(rShared, sShared);
-        // Only skip if the equality is known to be false (propagated).
-        // Do NOT skip EQUALITY_FALSE_IN_MODEL: the BV solver's candidate
-        // model may assign different values, but the final model could make
-        // them equal.  We must force a split to ensure the AEXT solver
-        // can fire either AccessStore (equal) or unconditional CongR
-        // (disequal) for every read-store pair.
-        if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED)
-        {
-          continue;
-        }
-        Trace("arrays::sharing")
-            << "AEXT care pair: read idx=" << rIdx << " store idx=" << sIdx
-            << " shared=(" << rShared << ", " << sShared << ")" << std::endl;
-        addCarePair(rShared, sShared);
+        continue;
       }
+      EqualityStatus es = d_valuation.getEqualityStatus(s1, s2);
+      // Only skip if the equality is known to be false (propagated).
+      // Do NOT skip EQUALITY_FALSE_IN_MODEL: the BV solver's candidate
+      // model may assign different values, but the final model could make
+      // them equal.
+      if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED)
+      {
+        continue;
+      }
+      Trace("arrays::sharing")
+          << "AEXT care pair: " << t1 << " vs " << t2 << " shared=(" << s1
+          << ", " << s2 << ")" << std::endl;
+      addCarePair(s1, s2);
     }
   }
 }
