@@ -130,8 +130,10 @@ void AextArraySolver::check(Theory::Effort level)
   // Build the parent store map for RowU propagation.
   buildParentMap();
 
-  // Compute active arrays for RowU gating.
-  computeActiveArrays();
+  // Compute the set of array reps that have at least one registered
+  // select.  Used to gate RowU propagation (JB11-FroCoS care function
+  // condition for the upward direction).
+  computeReadArrayReps();
 
   // Propagate all registered selects through store chains.
   for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
@@ -202,54 +204,17 @@ void AextArraySolver::buildParentMap()
   }
 }
 
-void AextArraySolver::computeActiveArrays()
+void AextArraySolver::computeReadArrayReps()
 {
-  d_activeArrays.clear();
-  std::vector<TNode> worklist;
-
-  // Seed: find store reps whose EQ class has > 1 member.
-  std::unordered_set<TNode> checked;
-  for (size_t i = 0, sz = d_stores.size(); i < sz; ++i)
+  d_readArrayReps.clear();
+  for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
   {
-    TNode store = d_stores[i];
-    if (!d_ee->hasTerm(store))
+    TNode select = d_selects[i];
+    if (!d_ee->hasTerm(select))
     {
       continue;
     }
-    TNode rep = d_ee->getRepresentative(store);
-    if (!checked.insert(rep).second)
-    {
-      continue;
-    }
-
-    eq::EqClassIterator eqi(rep, d_ee);
-    ++eqi;  // skip first
-    if (!eqi.isFinished())
-    {
-      d_activeArrays.insert(rep);
-      worklist.push_back(rep);
-    }
-  }
-
-  // Propagate downward: mark store bases as active.
-  while (!worklist.empty())
-  {
-    TNode rep = worklist.back();
-    worklist.pop_back();
-    eq::EqClassIterator eqi(rep, d_ee);
-    while (!eqi.isFinished())
-    {
-      TNode n = *eqi;
-      if (n.getKind() == Kind::STORE)
-      {
-        TNode baseRep = d_ee->getRepresentative(n[0]);
-        if (d_activeArrays.insert(baseRep).second)
-        {
-          worklist.push_back(baseRep);
-        }
-      }
-      ++eqi;
-    }
+    d_readArrayReps.insert(d_ee->getRepresentative(select[0]));
   }
 }
 
@@ -432,15 +397,22 @@ void AextArraySolver::checkAccess(TNode select)
     }
 
     // Step 4: RowU -- propagate upward through parent stores.
-    // Only propagate if this array rep is active (reachable from an
-    // equality chain). Without equalities, RowD alone suffices.
-    if (d_activeArrays.count(arrayRep))
+    // Gated on the JB11-FroCoS care function condition: only walk into
+    // a parent store `a = store(b, i, v)` if some read targets `a`
+    // (i.e. rep(a) appears in d_readArrayReps).  Without a read on the
+    // parent, the propagated value cannot participate in any congruence
+    // and the resulting index split would be wasted work.
     {
       auto pit = d_parentStores.find(arrayRep);
       if (pit != d_parentStores.end())
       {
         for (TNode store : pit->second)
         {
+          TNode parentRep = d_ee->getRepresentative(store);
+          if (!d_readArrayReps.count(parentRep))
+          {
+            continue;
+          }
           TNode storeIndexRep = d_ee->getRepresentative(store[1]);
           if (indexRep != storeIndexRep)
           {
@@ -536,16 +508,23 @@ TNode AextArraySolver::findPathConditions(TNode select,
       break;
     }
 
-    // RowU: parent stores with different index.
+    // RowU: parent stores with different index.  Must mirror the
+    // d_readArrayReps gate used in checkAccess(); otherwise the BFS
+    // could try to follow an edge that the forward propagation never
+    // took.
     {
       auto pit = d_parentStores.find(arrayRep);
       if (pit != d_parentStores.end())
       {
         for (TNode store : pit->second)
         {
+          TNode storeRep = d_ee->getRepresentative(store);
+          if (!d_readArrayReps.count(storeRep))
+          {
+            continue;
+          }
           if (d_ee->getRepresentative(store[1]) != indexRep)
           {
-            TNode storeRep = d_ee->getRepresentative(store);
             if (edges.find(storeRep) == edges.end())
             {
               edges[storeRep] = {store, store, arrayRep, true};
