@@ -196,16 +196,8 @@ class AextArraySolver : protected EnvObj
    * (child[0]) is in that equivalence class. Used for RowU propagation.
    */
   void buildParentMap();
-  /**
-   * Compute the set of array representatives that have at least one
-   * registered SELECT term.  Used to gate RowU propagation: a read should
-   * only flow upward into a parent store `a = store(b, i, v)` if some
-   * read targets `a` (or anything congruent to `a`).  This is the
-   * precise version of the JB11-FroCoS care function condition for
-   * `E_i^phi` in the upward direction -- propagating into a parent that
-   * is never read produces wasted index splits.
-   */
-  void computeReadArrayReps();
+  /** Compute active array representatives for RowU gating. */
+  void computeActiveArrays();
   //--------------------------------- end propagation
 
   /** Reference to the theory state */
@@ -254,13 +246,13 @@ class AextArraySolver : protected EnvObj
    */
   std::unordered_map<TNode, std::vector<TNode>> d_parentStores;
   /**
-   * Array representatives that have at least one registered SELECT term
-   * (rebuilt each check()).  RowU propagation into a parent store
-   * `a = store(b, i, v)` is gated on `rep(a)` being in this set --
-   * otherwise the propagated value cannot participate in any congruence
-   * and the resulting index split would be wasted work.
+   * Active array representatives for RowU gating (rebuilt each check()).
+   * An array rep is active if its EQ class has size > 1 (meaning an
+   * equality merged it with another term), or if it is transitively
+   * reachable downward through store[0] edges from an active rep.
+   * RowU propagation is only performed from active array reps.
    */
-  std::unordered_set<TNode> d_readArrayReps;
+  std::unordered_set<TNode> d_activeArrays;
   //--------------------------------- end per-check data structures
 
   //--------------------------------- statistics
