@@ -1205,11 +1205,12 @@ void TheoryArrays::computeCareGraph()
         continue;
       }
       EqualityStatus es = d_valuation.getEqualityStatus(s1, s2);
-      // Only skip if the equality is known to be false (propagated).
-      // Do NOT skip EQUALITY_FALSE_IN_MODEL: the BV solver's candidate
-      // model may assign different values, but the final model could make
-      // them equal.
-      if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED)
+      // Skip pairs whose equality status is already false in the current
+      // model: these are deferred and will be retried on subsequent check()
+      // calls (since d_pendingCarePairs is rebuilt each check).  This avoids
+      // an explosion of splits that the SAT model already disagrees with.
+      if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED
+          || es == EQUALITY_FALSE_IN_MODEL)
       {
         continue;
       }
