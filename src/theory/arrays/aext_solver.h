@@ -185,6 +185,18 @@ class AextArraySolver : protected EnvObj
                            TNode targetRep,
                            std::vector<Node>& conds);
   /**
+   * RIntro2 theory propagation.
+   *
+   * For each STORE term `n = store(c, k, v)`, scan existing SELECT terms
+   * for pairs (r1, r2) with rep(r1[0]) = rep(n), rep(r2[0]) = rep(c), and
+   * rep(r1[1]) = rep(r2[1]), where the read index is currently entailed
+   * disequal from `k`.  Asserts r1 = r2 as an internal fact, justified by
+   * the array equalities, the index equality, and the index disequality.
+   *
+   * Uses only existing SELECT terms (no new reads introduced).
+   */
+  void propagateRIntro2();
+  /**
    * Process array disequalities (DisEq rule).
    * For each disequality a != b, creates a witness index k and generates:
    *   (a != b) => select(a, k) != select(b, k)
@@ -270,6 +282,8 @@ class AextArraySolver : protected EnvObj
   IntStat d_numPropagationsDown;
   /** Number of upward propagation steps (RowU) */
   IntStat d_numPropagationsUp;
+  /** Number of RIntro2 theory propagations */
+  IntStat d_numRIntro2Propagations;
   //--------------------------------- end statistics
 };
 

@@ -50,7 +50,9 @@ AextArraySolver::AextArraySolver(Env& env,
       d_numPropagationsDown(statisticsRegistry().registerInt(
           "theory::arrays::aext::numPropagationsDown")),
       d_numPropagationsUp(statisticsRegistry().registerInt(
-          "theory::arrays::aext::numPropagationsUp"))
+          "theory::arrays::aext::numPropagationsUp")),
+      d_numRIntro2Propagations(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numRIntro2Propagations"))
 {
 }
 
@@ -132,6 +134,13 @@ void AextArraySolver::check(Theory::Effort level)
 
   // Compute active arrays for RowU gating.
   computeActiveArrays();
+
+  // RIntro2 theory propagation: for each store, find pairs of existing
+  // reads on the store and its base at congruent indices known disequal
+  // from the store index, and assert the read equality directly.  This
+  // runs before the main propagation pass so that any resulting EE merges
+  // tighten what RowD/RowU sees.
+  propagateRIntro2();
 
   // Propagate all registered selects through store chains.
   for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
@@ -617,6 +626,85 @@ TNode AextArraySolver::findPathConditions(TNode select,
   }
 
   return edges[targetRep].entryArray;
+}
+
+void AextArraySolver::propagateRIntro2()
+{
+  // Syntactic RIntro2: scan reads of the form select(store(c, k, v), j)
+  // where j ≠ k is currently entailed, and look for an existing
+  // select(c, j') with rep(j) = rep(j').  Assert the equality directly.
+  //
+  // We only consider reads whose array argument is *literally* a store
+  // (not merged into a store's class via equalities), which sharply
+  // limits the number of fires and avoids re-asserting the same fact in
+  // every SAT branch.
+  NodeManager* nm = nodeManager();
+
+  // Build (cRep, jRep) -> select index, restricted to base arrays we may
+  // need to look up.  Built lazily on first need.
+  std::unordered_map<TNode, std::unordered_map<TNode, TNode>> readsByArray;
+  bool readsBuilt = false;
+  auto buildReads = [&]() {
+    if (readsBuilt) return;
+    readsBuilt = true;
+    for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
+    {
+      TNode s = d_selects[i];
+      if (!d_ee->hasTerm(s)) continue;
+      TNode aRep = d_ee->getRepresentative(s[0]);
+      TNode iRep = d_ee->getRepresentative(s[1]);
+      readsByArray[aRep][iRep] = s;
+    }
+  };
+
+  for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
+  {
+    if (d_state.isInConflict()) return;
+    TNode rN = d_selects[i];
+    if (!d_ee->hasTerm(rN)) continue;
+    TNode arr = rN[0];
+    if (arr.getKind() != Kind::STORE) continue;  // syntactic restriction
+    TNode k = arr[1];
+    TNode j = rN[1];
+    if (j == k) continue;  // RIntro1 case
+    if (!d_ee->areDisequal(j, k, false)) continue;
+
+    buildReads();
+    TNode cRep = d_ee->getRepresentative(arr[0]);
+    TNode jRep = d_ee->getRepresentative(j);
+    auto cit = readsByArray.find(cRep);
+    if (cit == readsByArray.end()) continue;
+    auto rit = cit->second.find(jRep);
+    if (rit == cit->second.end()) continue;
+    TNode rC = rit->second;
+    if (rN == rC) continue;
+    if (d_ee->areEqual(rN, rC)) continue;
+
+    // Build justification:
+    //   (rC[0] = arr[0]) ∧ (rC[1] = j) ∧ (j ≠ k)
+    // No guard needed for rN[0] = arr (they are syntactically equal).
+    std::vector<Node> expVec;
+    if (rC[0] != arr[0])
+    {
+      expVec.push_back(rC[0].eqNode(arr[0]));
+    }
+    if (rC[1] != j)
+    {
+      expVec.push_back(rC[1].eqNode(j));
+    }
+    expVec.push_back(j.eqNode(k).notNode());
+
+    Node eq = rN.eqNode(rC);
+    if (!d_lemmaCache.insert(eq)) continue;
+    Node reason = expVec.size() == 1 ? expVec[0] : nm->mkAnd(expVec);
+    Trace("arrays::aext") << "RIntro2 lemma: " << reason << " => " << eq
+                          << std::endl;
+    d_im.arrayLemma(eq,
+                    InferenceId::ARRAYS_READ_OVER_WRITE,
+                    reason,
+                    ProofRule::ARRAYS_READ_OVER_WRITE);
+    ++d_numRIntro2Propagations;
+  }
 }
 
 void AextArraySolver::checkDisequalities()
