@@ -630,80 +630,109 @@ TNode AextArraySolver::findPathConditions(TNode select,
 
 void AextArraySolver::propagateRIntro2()
 {
-  // Syntactic RIntro2: scan reads of the form select(store(c, k, v), j)
-  // where j ≠ k is currently entailed, and look for an existing
-  // select(c, j') with rep(j) = rep(j').  Assert the equality directly.
+  // Row theory propagation, mirroring the default solver's
+  // propagateRowLemma (theory_arrays.cpp:2014).  For each store(c, k, v)
+  // whose EE class contains existing selects, and for each pair of reads
+  // rN = select(a, j) and rC = select(b, j') where:
+  //   - rep(a) = rep(store) and rep(b) = rep(c) (or vice versa)
+  //   - rep(j) = rep(j')
+  //   - areDisequal(j, k, true)   [j ≠ k entailed]
+  // assert rN = rC as an internal fact via assertInference.
   //
-  // We only consider reads whose array argument is *literally* a store
-  // (not merged into a store's class via equalities), which sharply
-  // limits the number of fires and avoids re-asserting the same fact in
-  // every SAT branch.
+  // Also handles the contrapositive: if rN ≠ rC is entailed (both exist,
+  // areDisequal(rN, rC, true)), propagate j = k.
+  //
+  // Using assertInference (internal fact, visible to EE immediately)
+  // rather than arrayLemma is the key difference from the previous
+  // syntactic-only lemma-based approach.  It mirrors default's 313 ROW
+  // fact propagations on qlock.base.5.smt2 and is what lets the EE→SAT
+  // theory-propagation loop close the proof in a single full check.
   NodeManager* nm = nodeManager();
 
-  // Build (cRep, jRep) -> select index, restricted to base arrays we may
-  // need to look up.  Built lazily on first need.
+  // Build readsByArray[arrayRep][indexRep] -> existing select.
   std::unordered_map<TNode, std::unordered_map<TNode, TNode>> readsByArray;
-  bool readsBuilt = false;
-  auto buildReads = [&]() {
-    if (readsBuilt) return;
-    readsBuilt = true;
-    for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
-    {
-      TNode s = d_selects[i];
-      if (!d_ee->hasTerm(s)) continue;
-      TNode aRep = d_ee->getRepresentative(s[0]);
-      TNode iRep = d_ee->getRepresentative(s[1]);
-      readsByArray[aRep][iRep] = s;
-    }
-  };
-
   for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
   {
+    TNode s = d_selects[i];
+    if (!d_ee->hasTerm(s)) continue;
+    TNode aRep = d_ee->getRepresentative(s[0]);
+    TNode iRep = d_ee->getRepresentative(s[1]);
+    readsByArray[aRep][iRep] = s;
+  }
+
+  // Iterate stores and look for propagation opportunities.
+  for (size_t si = 0, ssz = d_stores.size(); si < ssz; ++si)
+  {
     if (d_state.isInConflict()) return;
-    TNode rN = d_selects[i];
-    if (!d_ee->hasTerm(rN)) continue;
-    TNode arr = rN[0];
-    if (arr.getKind() != Kind::STORE) continue;  // syntactic restriction
-    TNode k = arr[1];
-    TNode j = rN[1];
-    if (j == k) continue;  // RIntro1 case
-    if (!d_ee->areDisequal(j, k, false)) continue;
+    TNode store = d_stores[si];
+    if (!d_ee->hasTerm(store)) continue;
+    TNode k = store[1];
+    TNode storeRep = d_ee->getRepresentative(store);
+    TNode baseRep = d_ee->getRepresentative(store[0]);
 
-    buildReads();
-    TNode cRep = d_ee->getRepresentative(arr[0]);
-    TNode jRep = d_ee->getRepresentative(j);
-    auto cit = readsByArray.find(cRep);
-    if (cit == readsByArray.end()) continue;
-    auto rit = cit->second.find(jRep);
-    if (rit == cit->second.end()) continue;
-    TNode rC = rit->second;
-    if (rN == rC) continue;
-    if (d_ee->areEqual(rN, rC)) continue;
+    // Skip if store and base are the same representative (degenerate).
+    if (storeRep == baseRep) continue;
 
-    // Build justification:
-    //   (rC[0] = arr[0]) ∧ (rC[1] = j) ∧ (j ≠ k)
-    // No guard needed for rN[0] = arr (they are syntactically equal).
-    std::vector<Node> expVec;
-    if (rC[0] != arr[0])
+    // Look up reads on the store side.
+    auto storeIt = readsByArray.find(storeRep);
+    if (storeIt == readsByArray.end()) continue;
+
+    // Look up reads on the base side.
+    auto baseIt = readsByArray.find(baseRep);
+    if (baseIt == readsByArray.end()) continue;
+
+    // For each read on the store side, try to match a read on the base.
+    for (const auto& [jRep, rN] : storeIt->second)
     {
-      expVec.push_back(rC[0].eqNode(arr[0]));
-    }
-    if (rC[1] != j)
-    {
-      expVec.push_back(rC[1].eqNode(j));
-    }
-    expVec.push_back(j.eqNode(k).notNode());
+      if (d_state.isInConflict()) return;
+      if (d_ee->getRepresentative(k) == jRep) continue;  // RIntro1
 
-    Node eq = rN.eqNode(rC);
-    if (!d_lemmaCache.insert(eq)) continue;
-    Node reason = expVec.size() == 1 ? expVec[0] : nm->mkAnd(expVec);
-    Trace("arrays::aext") << "RIntro2 lemma: " << reason << " => " << eq
-                          << std::endl;
-    d_im.arrayLemma(eq,
-                    InferenceId::ARRAYS_READ_OVER_WRITE,
-                    reason,
-                    ProofRule::ARRAYS_READ_OVER_WRITE);
-    ++d_numRIntro2Propagations;
+      auto rit = baseIt->second.find(jRep);
+      if (rit == baseIt->second.end()) continue;
+      TNode rC = rit->second;
+      if (rN == rC || d_ee->areEqual(rN, rC)) continue;
+
+      TNode j = rN[1];
+
+      // Forward: if j ≠ k entailed, propagate rN = rC as internal fact.
+      if (d_ee->areDisequal(j, k, true))
+      {
+        Node eq = rN.eqNode(rC);
+        if (!d_lemmaCache.insert(eq)) continue;
+        std::vector<Node> expVec;
+        if (rN[0] != store)
+        {
+          expVec.push_back(rN[0].eqNode(static_cast<Node>(store)));
+        }
+        if (rC[0] != store[0])
+        {
+          expVec.push_back(rC[0].eqNode(store[0]));
+        }
+        if (rC[1] != j)
+        {
+          expVec.push_back(rC[1].eqNode(j));
+        }
+        expVec.push_back(j.eqNode(k).notNode());
+        Node reason = nm->mkAnd(expVec);
+        Trace("arrays::aext")
+            << "RIntro2: " << reason << " => " << eq << std::endl;
+        // Send as a SAT-level lemma (for learning) AND as an EE-level
+        // fact (for immediate propagation).  Both are needed: the lemma
+        // persists across SAT branches, while the fact drives the
+        // EE→SAT theory-propagation loop that lets qlock converge.
+        d_im.arrayLemma(eq,
+                        InferenceId::ARRAYS_READ_OVER_WRITE,
+                        reason,
+                        ProofRule::ARRAYS_READ_OVER_WRITE);
+        d_im.assertInference(eq,
+                             true,
+                             InferenceId::ARRAYS_READ_OVER_WRITE,
+                             reason,
+                             ProofRule::ARRAYS_READ_OVER_WRITE);
+        ++d_numRIntro2Propagations;
+        continue;
+      }
+    }
   }
 }
 
