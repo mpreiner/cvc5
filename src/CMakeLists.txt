@@ -576,6 +576,9 @@ libcvc5_add_sources(
   theory/arith/type_enumerator.h
   theory/arrays/aext_solver.cpp
   theory/arrays/aext_solver.h
+  theory/arrays/array_solver.h
+  theory/arrays/array_solver_default.cpp
+  theory/arrays/array_solver_default.h
   theory/arrays/array_info.cpp
   theory/arrays/array_info.h
   theory/arrays/infer_proof_cons.cpp
