@@ -1701,7 +1701,8 @@ void TheoryArrays::mergeArraysModelOnly(TNode a, TNode b)
   if (itA != d_defValues.end())
   {
     defValue = (*itA).second;
-    if (itB != d_defValues.end() && defValue != (*itB).second)
+    if ((itB != d_defValues.end() && defValue != (*itB).second)
+        || (mayRepA.isConst() && mayRepB.isConst() && mayRepA != mayRepB))
     {
       throw LogicException(
           "Array theory solver does not yet support write-chains connecting "
@@ -1711,6 +1712,18 @@ void TheoryArrays::mergeArraysModelOnly(TNode a, TNode b)
   else if (itB != d_defValues.end())
   {
     defValue = (*itB).second;
+    if (mayRepA.isConst() && mayRepB.isConst() && mayRepA != mayRepB)
+    {
+      throw LogicException(
+          "Array theory solver does not yet support write-chains connecting "
+          "two different constant arrays");
+    }
+  }
+  else if (mayRepA.isConst() && mayRepB.isConst() && mayRepA != mayRepB)
+  {
+    throw LogicException(
+        "Array theory solver does not yet support write-chains connecting "
+        "two different constant arrays");
   }
   d_mayEqualEqualityEngine.assertEquality(a.eqNode(b), true, d_true);
   Assert(d_mayEqualEqualityEngine.consistent());
