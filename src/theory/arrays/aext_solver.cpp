@@ -306,8 +306,9 @@ void AextArraySolver::checkAccess(TNode select)
           Node conc = select.eqNode(existing.select);
           // Reconstruct path conditions from both reads via BFS.
           std::vector<Node> expVec;
-          findPathConditions(select, arrayRep, expVec);
-          findPathConditions(existing.select, arrayRep, expVec);
+          std::vector<std::vector<PathEdge>> paths(2);
+          findPathConditions(select, arrayRep, expVec, &paths[0]);
+          findPathConditions(existing.select, arrayRep, expVec, &paths[1]);
           if (index != existing.index)
           {
             expVec.push_back(index.eqNode(existing.index));
@@ -320,7 +321,8 @@ void AextArraySolver::checkAccess(TNode select)
             d_im.arrayLemma(conc,
                             InferenceId::ARRAYS_AEXT_CONGRUENCE,
                             exp,
-                            ProofRule::ARRAYS_READ_OVER_WRITE);
+                            ProofRule::ARRAYS_READ_OVER_WRITE,
+                            std::move(paths));
             ++d_numCongruenceLemmas;
           }
         }
@@ -346,7 +348,9 @@ void AextArraySolver::checkAccess(TNode select)
             {
               Node conc = select.eqNode(n[2]);
               std::vector<Node> expVec;
-              TNode entryArray = findPathConditions(select, arrayRep, expVec);
+              std::vector<std::vector<PathEdge>> paths(1);
+              TNode entryArray =
+                  findPathConditions(select, arrayRep, expVec, &paths[0]);
               if (index != n[1])
               {
                 expVec.push_back(index.eqNode(n[1]));
@@ -365,7 +369,8 @@ void AextArraySolver::checkAccess(TNode select)
               d_im.arrayLemma(conc,
                               InferenceId::ARRAYS_AEXT_ROW,
                               reason,
-                              ProofRule::ARRAYS_READ_OVER_WRITE);
+                              ProofRule::ARRAYS_READ_OVER_WRITE,
+                              std::move(paths));
               ++d_numAccessStoreLemmas;
             }
             break;
@@ -390,7 +395,9 @@ void AextArraySolver::checkAccess(TNode select)
           {
             Node conc = select.eqNode(defValue);
             std::vector<Node> expVec;
-            TNode entryArray = findPathConditions(select, arrayRep, expVec);
+            std::vector<std::vector<PathEdge>> paths(1);
+            TNode entryArray =
+                findPathConditions(select, arrayRep, expVec, &paths[0]);
             if (entryArray != n)
             {
               expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
@@ -401,7 +408,8 @@ void AextArraySolver::checkAccess(TNode select)
             d_im.arrayLemma(conc,
                             InferenceId::ARRAYS_CONST_ARRAY_DEFAULT,
                             reason,
-                            ProofRule::TRUST);
+                            ProofRule::ARRAYS_READ_OVER_WRITE_1,
+                            std::move(paths));
             ++d_numConstArrayLemmas;
           }
           break;
@@ -474,7 +482,8 @@ void AextArraySolver::checkAccess(TNode select)
 
 TNode AextArraySolver::findPathConditions(TNode select,
                                           TNode targetRep,
-                                          std::vector<Node>& conds)
+                                          std::vector<Node>& conds,
+                                          std::vector<PathEdge>* pathEdges)
 {
   TNode index = select[1];
   TNode indexRep = d_ee->getRepresentative(index);
@@ -488,6 +497,10 @@ TNode AextArraySolver::findPathConditions(TNode select,
     {
       conds.push_back(startArray.eqNode(static_cast<Node>(startRep)));
     }
+    if (pathEdges)
+    {
+      pathEdges->push_back({TNode(), false});
+    }
     return startArray;
   }
 
@@ -500,8 +513,8 @@ TNode AextArraySolver::findPathConditions(TNode select,
     bool isRowU;      /**< true if RowU edge */
   };
 
-  std::unordered_map<TNode, BFSEdge> edges;
-  edges[startRep] = {startArray, TNode(), TNode(), false};
+  std::unordered_map<TNode, BFSEdge> bfsEdges;
+  bfsEdges[startRep] = {startArray, TNode(), TNode(), false};
 
   // BFS queue of array representatives.
   std::deque<TNode> queue;
@@ -523,9 +536,9 @@ TNode AextArraySolver::findPathConditions(TNode select,
             && d_ee->getRepresentative(n[1]) != indexRep)
         {
           TNode childRep = d_ee->getRepresentative(n[0]);
-          if (edges.find(childRep) == edges.end())
+          if (bfsEdges.find(childRep) == bfsEdges.end())
           {
-            edges[childRep] = {n[0], n, arrayRep, false};
+            bfsEdges[childRep] = {n[0], n, arrayRep, false};
             if (childRep == targetRep)
             {
               found = true;
@@ -555,9 +568,9 @@ TNode AextArraySolver::findPathConditions(TNode select,
           if (d_ee->getRepresentative(store[1]) != indexRep)
           {
             TNode storeRep = d_ee->getRepresentative(store);
-            if (edges.find(storeRep) == edges.end())
+            if (bfsEdges.find(storeRep) == bfsEdges.end())
             {
-              edges[storeRep] = {store, store, arrayRep, true};
+              bfsEdges[storeRep] = {store, store, arrayRep, true};
               if (storeRep == targetRep)
               {
                 found = true;
@@ -578,54 +591,63 @@ TNode AextArraySolver::findPathConditions(TNode select,
   TNode cur = targetRep;
   while (true)
   {
-    auto it = edges.find(cur);
-    Assert(it != edges.end());
-    const BFSEdge& edge = it->second;
+    auto it = bfsEdges.find(cur);
+    Assert(it != bfsEdges.end());
+    const BFSEdge& be = it->second;
 
-    if (edge.store.isNull())
+    if (be.store.isNull())
     {
       // Start node — add initial EE merge guard if needed.
-      if (edge.entryArray != cur)
+      if (be.entryArray != cur)
       {
-        conds.push_back(edge.entryArray.eqNode(static_cast<Node>(cur)));
+        conds.push_back(be.entryArray.eqNode(static_cast<Node>(cur)));
+      }
+      if (pathEdges)
+      {
+        pathEdges->push_back({TNode(), false});
       }
       break;
     }
 
     // Guard for EE merge between the entry array and its representative.
-    if (edge.entryArray != cur)
+    if (be.entryArray != cur)
     {
-      conds.push_back(edge.entryArray.eqNode(static_cast<Node>(cur)));
+      conds.push_back(be.entryArray.eqNode(static_cast<Node>(cur)));
     }
 
     // Look up the entry array at the source rep.
-    auto pit = edges.find(edge.fromRep);
-    Assert(pit != edges.end());
+    auto pit = bfsEdges.find(be.fromRep);
+    Assert(pit != bfsEdges.end());
     TNode prevEntry = pit->second.entryArray;
 
-    if (edge.isRowU)
+    if (be.isRowU)
     {
       // RowU: we pushed the store itself; guard is prevEntry = store[0]
-      if (prevEntry != edge.store[0])
+      if (prevEntry != be.store[0])
       {
-        conds.push_back(prevEntry.eqNode(edge.store[0]));
+        conds.push_back(prevEntry.eqNode(be.store[0]));
       }
     }
     else
     {
       // RowD: we pushed store[0]; guard is prevEntry = store
-      if (prevEntry != edge.store)
+      if (prevEntry != be.store)
       {
-        conds.push_back(prevEntry.eqNode(static_cast<Node>(edge.store)));
+        conds.push_back(prevEntry.eqNode(static_cast<Node>(be.store)));
       }
     }
     // Index disequality condition for passing through this store.
-    conds.push_back(index.eqNode(edge.store[1]).notNode());
+    conds.push_back(index.eqNode(be.store[1]).notNode());
 
-    cur = edge.fromRep;
+    if (pathEdges)
+    {
+      pathEdges->push_back({be.store, be.isRowU});
+    }
+
+    cur = be.fromRep;
   }
 
-  return edges[targetRep].entryArray;
+  return bfsEdges[targetRep].entryArray;
 }
 
 void AextArraySolver::propagateRIntro2()

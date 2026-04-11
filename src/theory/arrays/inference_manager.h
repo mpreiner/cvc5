@@ -18,11 +18,14 @@
 #include "expr/node.h"
 #include "proof/eager_proof_generator.h"
 #include "cvc5/cvc5_proof_rule.h"
+#include "theory/arrays/path_edge.h"
 #include "theory/theory_inference_manager.h"
 
 namespace cvc5::internal {
 namespace theory {
 namespace arrays {
+
+class ArraysInferProofCons;
 
 /**
  * The arrays inference manager.
@@ -31,7 +34,7 @@ class InferenceManager : public TheoryInferenceManager
 {
  public:
   InferenceManager(Env& env, Theory& t, TheoryState& state);
-  ~InferenceManager() {}
+  ~InferenceManager();
 
   /**
    * Assert inference. This sends an internal fact to the equality engine
@@ -53,19 +56,38 @@ class InferenceManager : public TheoryInferenceManager
                   Node exp,
                   ProofRule pfr,
                   LemmaProperty p = LemmaProperty::NONE);
+  /**
+   * Send lemma with path edge information for proof reconstruction.
+   * @param paths path edge vectors from findPathConditions
+   */
+  bool arrayLemma(Node conc,
+                  InferenceId id,
+                  Node exp,
+                  ProofRule pfr,
+                  std::vector<std::vector<PathEdge>>&& paths,
+                  LemmaProperty p = LemmaProperty::NONE);
 
  private:
+  /** Return true if id is an AEXT-specific inference. */
+  static bool isAextInference(InferenceId id);
   /**
    * Converts a conclusion, explanation and proof rule id used by the array
    * theory to the set of arguments required for a proof rule application.
+   * Used for the default (non-AEXT) array solver.
    */
   void convert(ProofRule& id,
                Node conc,
                Node exp,
                std::vector<Node>& children,
                std::vector<Node>& args);
-  /** Eager proof generator for lemmas from the above method */
+  /** Eager proof generator for lemmas */
   std::unique_ptr<EagerProofGenerator> d_lemmaPg;
+  /**
+   * Inference proof constructor for the AEXT solver.  Uses lazy proof
+   * reconstruction: inferences are stored and proofs are built on demand.
+   * Context-dependent instance for assertInference (EE-level facts).
+   */
+  std::unique_ptr<ArraysInferProofCons> d_ipc;
 };
 
 }  // namespace arrays
