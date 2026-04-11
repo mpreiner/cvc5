@@ -582,8 +582,11 @@ libcvc5_add_sources(
   theory/arrays/aext_solver.h
   theory/arrays/array_info.cpp
   theory/arrays/array_info.h
+  theory/arrays/infer_proof_cons.cpp
+  theory/arrays/infer_proof_cons.h
   theory/arrays/inference_manager.cpp
   theory/arrays/inference_manager.h
+  theory/arrays/path_edge.h
   theory/arrays/proof_checker.cpp
   theory/arrays/proof_checker.h
   theory/arrays/skolem_cache.cpp

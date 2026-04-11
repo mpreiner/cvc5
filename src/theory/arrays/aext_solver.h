@@ -51,6 +51,7 @@
 #include "context/cdlist.h"
 #include "smt/env_obj.h"
 #include "theory/arrays/inference_manager.h"
+#include "theory/arrays/path_edge.h"
 #include "theory/theory.h"
 #include "theory/theory_state.h"
 #include "theory/uf/equality_engine.h"
@@ -183,7 +184,8 @@ class AextArraySolver : protected EnvObj
    */
   TNode findPathConditions(TNode select,
                            TNode targetRep,
-                           std::vector<Node>& conds);
+                           std::vector<Node>& conds,
+                           std::vector<PathEdge>* edges = nullptr);
   /**
    * RIntro2 theory propagation.
    *
