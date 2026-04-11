@@ -813,7 +813,6 @@ void ArraysInferProofCons::convertRIntro2(TNode conc,
     return;
   }
 
-  Assert(!idxDiseq.isNull());
   TNode j = rN[1];
   TNode k = store[1];
   Node storeChild = store[0];
@@ -835,6 +834,13 @@ void ArraysInferProofCons::convertRIntro2(TNode conc,
   // Step 2: ROW: select(store, j) = select(store[0], j)
   Node selOnChild = nm->mkNode(Kind::SELECT, storeChild, j);
   Node diseq = k.eqNode(j).notNode();
+  // When both indices are const, the disequality is a tautology and does not
+  // appear in the explanation.  Derive it via rewriting.
+  if (idxDiseq.isNull())
+  {
+    Assert(k.isConst() && j.isConst() && k != j);
+    cdp->addStep(diseq, ProofRule::MACRO_SR_PRED_INTRO, {}, {diseq});
+  }
   Node rowConc = selOnStore.eqNode(selOnChild);
   cdp->addStep(
       rowConc, ProofRule::ARRAYS_READ_OVER_WRITE, {diseq}, {selOnStore});

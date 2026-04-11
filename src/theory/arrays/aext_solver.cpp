@@ -16,6 +16,7 @@
 
 #include "expr/array_store_all.h"
 #include "expr/node_manager.h"
+#include "smt/logic_exception.h"
 #include "theory/arrays/skolem_cache.h"
 #include "theory/theory_model.h"
 
@@ -27,11 +28,11 @@ namespace arrays {
 
 AextArraySolver::AextArraySolver(Env& env,
                                  TheoryState& state,
-                                 InferenceManager& im)
-    : EnvObj(env),
-      d_state(state),
-      d_im(im),
-      d_ee(nullptr),
+                                 InferenceManager& im,
+                                 Valuation valuation,
+                                 eq::EqualityEngine& mayEqualEE,
+                                 DefValMap& defValues)
+    : ArraySolver(env, state, im, valuation, mayEqualEE, defValues),
       d_selects(context()),
       d_stores(context()),
       d_arrayDisequalities(context()),
@@ -64,6 +65,12 @@ void AextArraySolver::finishInit(eq::EqualityEngine* ee)
   d_ee = ee;
 }
 
+std::string AextArraySolver::identify() const { return "AextArraySolver"; }
+
+/////////////////////////////////////////////////////////////////////////////
+// TERM REGISTRATION
+/////////////////////////////////////////////////////////////////////////////
+
 void AextArraySolver::preRegisterSelect(TNode node)
 {
   Assert(node.getKind() == Kind::SELECT);
@@ -95,17 +102,88 @@ void AextArraySolver::preRegisterStore(TNode node)
                         ProofRule::ARRAYS_READ_OVER_WRITE_1);
 }
 
-void AextArraySolver::notifyMerge(TNode /*a*/, TNode /*b*/)
+void AextArraySolver::preRegisterStoreAll(TNode /*node*/)
 {
-  // Merges are handled lazily: the next check() call will re-propagate
-  // selects through the updated equivalence classes.
+  // STORE_ALL registration for AEXT: no additional solver-specific work needed.
+  // The shared code in TheoryArrays already sets d_defValues.
 }
 
-void AextArraySolver::notifyDisequality(TNode a, TNode /*b*/, TNode reason)
+/////////////////////////////////////////////////////////////////////////////
+// EQUALITY ENGINE CALLBACKS
+/////////////////////////////////////////////////////////////////////////////
+
+void AextArraySolver::eqNotifyMerge(TNode a, TNode b)
+{
+  mergeArraysModelOnly(a, b);
+}
+
+void AextArraySolver::mergeArraysModelOnly(TNode a, TNode b)
+{
+  Assert(a.getType().isArray() && b.getType().isArray());
+  a = d_ee->getRepresentative(a);
+  Assert(d_ee->getRepresentative(b) == a);
+
+  Node d_true = nodeManager()->mkConst<bool>(true);
+
+  // Maintain d_mayEqualEqualityEngine and d_defValues for model construction
+  TNode mayRepA = d_mayEqualEqualityEngine.getRepresentative(a);
+  TNode mayRepB = d_mayEqualEqualityEngine.getRepresentative(b);
+
+  DefValMap::iterator itA = d_defValues.find(mayRepA);
+  DefValMap::iterator itB = d_defValues.find(mayRepB);
+  TNode defValue;
+
+  if (itA != d_defValues.end())
+  {
+    defValue = (*itA).second;
+    if ((itB != d_defValues.end() && defValue != (*itB).second)
+        || (mayRepA.isConst() && mayRepB.isConst() && mayRepA != mayRepB))
+    {
+      throw LogicException(
+          "Array theory solver does not yet support write-chains connecting "
+          "two different constant arrays");
+    }
+  }
+  else if (itB != d_defValues.end())
+  {
+    defValue = (*itB).second;
+    if (mayRepA.isConst() && mayRepB.isConst() && mayRepA != mayRepB)
+    {
+      throw LogicException(
+          "Array theory solver does not yet support write-chains connecting "
+          "two different constant arrays");
+    }
+  }
+  else if (mayRepA.isConst() && mayRepB.isConst() && mayRepA != mayRepB)
+  {
+    throw LogicException(
+        "Array theory solver does not yet support write-chains connecting "
+        "two different constant arrays");
+  }
+  d_mayEqualEqualityEngine.assertEquality(a.eqNode(b), true, d_true);
+  Assert(d_mayEqualEqualityEngine.consistent());
+  if (!defValue.isNull())
+  {
+    mayRepA = d_mayEqualEqualityEngine.getRepresentative(a);
+    d_defValues[mayRepA] = defValue;
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// NOTIFICATIONS
+/////////////////////////////////////////////////////////////////////////////
+
+void AextArraySolver::notifyArrayDisequality(TNode a, TNode /*b*/, TNode reason)
 {
   Assert(a.getType().isArray());
   d_arrayDisequalities.push_back(reason);
 }
+
+/////////////////////////////////////////////////////////////////////////////
+// MAIN SOLVER
+/////////////////////////////////////////////////////////////////////////////
+
+void AextArraySolver::postCheck(Theory::Effort level) { check(level); }
 
 void AextArraySolver::check(Theory::Effort level)
 {
@@ -135,11 +213,7 @@ void AextArraySolver::check(Theory::Effort level)
   // Compute active arrays for RowU gating.
   computeActiveArrays();
 
-  // RIntro2 theory propagation: for each store, find pairs of existing
-  // reads on the store and its base at congruent indices known disequal
-  // from the store index, and assert the read equality directly.  This
-  // runs before the main propagation pass so that any resulting EE merges
-  // tighten what RowD/RowU sees.
+  // RIntro2 theory propagation
   propagateRIntro2();
 
   // Propagate all registered selects through store chains.
@@ -158,12 +232,9 @@ void AextArraySolver::check(Theory::Effort level)
     checkDisequalities();
   }
 
-  // Pending care pairs (d_pendingCarePairs) are consumed by
-  // TheoryArrays::computeCareGraph() to request index equality splits
-  // through the theory combination framework.  For pairs where at least
-  // one index is not a trigger term (not shared with other theories),
-  // we must send explicit split lemmas since the care graph cannot
-  // handle them.
+  // Pending care pairs: for pairs where at least one index is not a
+  // trigger term, send explicit split lemmas since the care graph
+  // cannot handle them.
   if (!d_state.isInConflict())
   {
     for (const auto& [t1, t2] : d_pendingCarePairs)
@@ -279,9 +350,6 @@ void AextArraySolver::checkAccess(TNode select)
   TNode indexRep = d_ee->getRepresentative(index);
   NodeManager* nm = nodeManager();
 
-  // Lightweight visit stack: just the array node, no path conditions
-  // or predecessor edges.  Path conditions are reconstructed on demand
-  // via findPathConditions() when a conflict is detected.
   std::vector<TNode> visit;
   visit.push_back(select[0]);
 
@@ -299,12 +367,9 @@ void AextArraySolver::checkAccess(TNode select)
       if (it != model.end())
       {
         PropagatedRead& existing = it->second;
-        // CongR: two reads reached the same array (by representative)
-        // at the same index. Check if their values differ.
         if (!d_ee->areEqual(select, existing.select))
         {
           Node conc = select.eqNode(existing.select);
-          // Reconstruct path conditions from both reads via BFS.
           std::vector<Node> expVec;
           std::vector<std::vector<PathEdge>> paths(2);
           findPathConditions(select, arrayRep, expVec, &paths[0]);
@@ -342,8 +407,6 @@ void AextArraySolver::checkAccess(TNode select)
           TNode storeIndexRep = d_ee->getRepresentative(n[1]);
           if (indexRep == storeIndexRep)
           {
-            // AccessStore: read index matches store index (same EE rep).
-            // The value should be the stored value n[2].
             if (!d_ee->areEqual(select, n[2]))
             {
               Node conc = select.eqNode(n[2]);
@@ -355,9 +418,6 @@ void AextArraySolver::checkAccess(TNode select)
               {
                 expVec.push_back(index.eqNode(n[1]));
               }
-              // Guard with array equality if the entry array (the node
-              // reached by the BFS) differs from the store (meaning the
-              // store was brought in by an EE merge within this class).
               if (entryArray != n)
               {
                 expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
@@ -381,7 +441,6 @@ void AextArraySolver::checkAccess(TNode select)
     }
 
     // Step 2b: Check for AccessConstArray (STORE_ALL in EQ class).
-    // When a read reaches a constant array, assert sel = defaultValue.
     {
       eq::EqClassIterator eqca(arrayRep, d_ee);
       while (!eqca.isFinished())
@@ -418,8 +477,7 @@ void AextArraySolver::checkAccess(TNode select)
       }
     }
 
-    // Step 3: RowD -- propagate downward through stores whose index
-    // has a different representative.
+    // Step 3: RowD -- propagate downward through stores
     {
       eq::EqClassIterator eqi2(arrayRep, d_ee);
       while (!eqi2.isFinished())
@@ -428,9 +486,6 @@ void AextArraySolver::checkAccess(TNode select)
         if (n.getKind() == Kind::STORE
             && d_ee->getRepresentative(n[1]) != indexRep)
         {
-          // Representatives differ → pass through (RowD).
-          // Record the pending split so the SAT solver can decide
-          // whether the indices are actually equal.
           if (!d_ee->areDisequal(index, n[1], false))
           {
             Node split = index.eqNode(n[1]);
@@ -449,8 +504,6 @@ void AextArraySolver::checkAccess(TNode select)
     }
 
     // Step 4: RowU -- propagate upward through parent stores.
-    // Only propagate if this array rep is active (reachable from an
-    // equality chain). Without equalities, RowD alone suffices.
     if (d_activeArrays.count(arrayRep))
     {
       auto pit = d_parentStores.find(arrayRep);
@@ -504,19 +557,17 @@ TNode AextArraySolver::findPathConditions(TNode select,
     return startArray;
   }
 
-  // BFS edge: same structure as the old PropEdge, but built on demand.
   struct BFSEdge
   {
-    TNode entryArray; /**< concrete array node at this rep */
-    TNode store;      /**< store traversed (null for start) */
-    TNode fromRep;    /**< source rep (null for start) */
-    bool isRowU;      /**< true if RowU edge */
+    TNode entryArray;
+    TNode store;
+    TNode fromRep;
+    bool isRowU;
   };
 
   std::unordered_map<TNode, BFSEdge> bfsEdges;
   bfsEdges[startRep] = {startArray, TNode(), TNode(), false};
 
-  // BFS queue of array representatives.
   std::deque<TNode> queue;
   queue.push_back(startRep);
   bool found = false;
@@ -526,7 +577,7 @@ TNode AextArraySolver::findPathConditions(TNode select,
     TNode arrayRep = queue.front();
     queue.pop_front();
 
-    // RowD: iterate EQ class for stores with different index.
+    // RowD
     {
       eq::EqClassIterator eqi(arrayRep, d_ee);
       while (!eqi.isFinished() && !found)
@@ -558,7 +609,7 @@ TNode AextArraySolver::findPathConditions(TNode select,
       break;
     }
 
-    // RowU: parent stores with different index.
+    // RowU
     {
       auto pit = d_parentStores.find(arrayRep);
       if (pit != d_parentStores.end())
@@ -597,7 +648,6 @@ TNode AextArraySolver::findPathConditions(TNode select,
 
     if (be.store.isNull())
     {
-      // Start node — add initial EE merge guard if needed.
       if (be.entryArray != cur)
       {
         conds.push_back(be.entryArray.eqNode(static_cast<Node>(cur)));
@@ -609,20 +659,17 @@ TNode AextArraySolver::findPathConditions(TNode select,
       break;
     }
 
-    // Guard for EE merge between the entry array and its representative.
     if (be.entryArray != cur)
     {
       conds.push_back(be.entryArray.eqNode(static_cast<Node>(cur)));
     }
 
-    // Look up the entry array at the source rep.
     auto pit = bfsEdges.find(be.fromRep);
     Assert(pit != bfsEdges.end());
     TNode prevEntry = pit->second.entryArray;
 
     if (be.isRowU)
     {
-      // RowU: we pushed the store itself; guard is prevEntry = store[0]
       if (prevEntry != be.store[0])
       {
         conds.push_back(prevEntry.eqNode(be.store[0]));
@@ -630,13 +677,11 @@ TNode AextArraySolver::findPathConditions(TNode select,
     }
     else
     {
-      // RowD: we pushed store[0]; guard is prevEntry = store
       if (prevEntry != be.store)
       {
         conds.push_back(prevEntry.eqNode(static_cast<Node>(be.store)));
       }
     }
-    // Index disequality condition for passing through this store.
     conds.push_back(index.eqNode(be.store[1]).notNode());
 
     if (pathEdges)
@@ -652,23 +697,6 @@ TNode AextArraySolver::findPathConditions(TNode select,
 
 void AextArraySolver::propagateRIntro2()
 {
-  // Row theory propagation, mirroring the default solver's
-  // propagateRowLemma (theory_arrays.cpp:2014).  For each store(c, k, v)
-  // whose EE class contains existing selects, and for each pair of reads
-  // rN = select(a, j) and rC = select(b, j') where:
-  //   - rep(a) = rep(store) and rep(b) = rep(c) (or vice versa)
-  //   - rep(j) = rep(j')
-  //   - areDisequal(j, k, true)   [j ≠ k entailed]
-  // assert rN = rC as an internal fact via assertInference.
-  //
-  // Also handles the contrapositive: if rN ≠ rC is entailed (both exist,
-  // areDisequal(rN, rC, true)), propagate j = k.
-  //
-  // Using assertInference (internal fact, visible to EE immediately)
-  // rather than arrayLemma is the key difference from the previous
-  // syntactic-only lemma-based approach.  It mirrors default's 313 ROW
-  // fact propagations on qlock.base.5.smt2 and is what lets the EE→SAT
-  // theory-propagation loop close the proof in a single full check.
   NodeManager* nm = nodeManager();
 
   // Build readsByArray[arrayRep][indexRep] -> existing select.
@@ -692,22 +720,18 @@ void AextArraySolver::propagateRIntro2()
     TNode storeRep = d_ee->getRepresentative(store);
     TNode baseRep = d_ee->getRepresentative(store[0]);
 
-    // Skip if store and base are the same representative (degenerate).
     if (storeRep == baseRep) continue;
 
-    // Look up reads on the store side.
     auto storeIt = readsByArray.find(storeRep);
     if (storeIt == readsByArray.end()) continue;
 
-    // Look up reads on the base side.
     auto baseIt = readsByArray.find(baseRep);
     if (baseIt == readsByArray.end()) continue;
 
-    // For each read on the store side, try to match a read on the base.
     for (const auto& [jRep, rN] : storeIt->second)
     {
       if (d_state.isInConflict()) return;
-      if (d_ee->getRepresentative(k) == jRep) continue;  // RIntro1
+      if (d_ee->getRepresentative(k) == jRep) continue;
 
       auto rit = baseIt->second.find(jRep);
       if (rit == baseIt->second.end()) continue;
@@ -716,7 +740,6 @@ void AextArraySolver::propagateRIntro2()
 
       TNode j = rN[1];
 
-      // Forward: if j ≠ k entailed, propagate rN = rC as internal fact.
       if (d_ee->areDisequal(j, k, true))
       {
         Node eq = rN.eqNode(rC);
@@ -738,10 +761,6 @@ void AextArraySolver::propagateRIntro2()
         Node reason = nm->mkAnd(expVec);
         Trace("arrays::aext")
             << "RIntro2: " << reason << " => " << eq << std::endl;
-        // Send as a SAT-level lemma (for learning) AND as an EE-level
-        // fact (for immediate propagation).  Both are needed: the lemma
-        // persists across SAT branches, while the fact drives the
-        // EE→SAT theory-propagation loop that lets qlock converge.
         d_im.arrayLemma(eq,
                         InferenceId::ARRAYS_READ_OVER_WRITE,
                         reason,
@@ -793,10 +812,137 @@ void AextArraySolver::checkDisequalities()
   }
 }
 
-bool AextArraySolver::collectModelValues(TheoryModel* /*m*/,
-                                         const std::set<Node>& /*termSet*/)
+/////////////////////////////////////////////////////////////////////////////
+// MODEL GENERATION
+/////////////////////////////////////////////////////////////////////////////
+
+void AextArraySolver::computeRelevantTerms(std::set<Node>& /*termSet*/)
 {
-  return true;
+  // AEXT solver does not need RIntro2 fixed-point for relevant terms.
+  // Model consistency is ensured by augmentModelSelects() which propagates
+  // reads through store chains in both directions.
+}
+
+void AextArraySolver::augmentModelSelects(
+    std::map<Node, std::vector<Node>>& selects, const std::set<Node>& termSet)
+{
+  // Propagate reads through store chains in both directions.
+  // The AEXT solver does not create explicit select(base, i) terms via
+  // Row lemmas, so the model builder needs to trace reads through stores
+  // to ensure all arrays in a store chain get consistent values.
+
+  // Precompute map from child array rep to parent store nodes.
+  std::unordered_map<TNode, std::vector<TNode>> parentStores;
+  {
+    eq::EqClassesIterator eqcs = eq::EqClassesIterator(d_ee);
+    for (; !eqcs.isFinished(); ++eqcs)
+    {
+      Node eqc = (*eqcs);
+      if (!eqc.getType().isArray())
+      {
+        continue;
+      }
+      eq::EqClassIterator eci(eqc, d_ee);
+      for (; !eci.isFinished(); ++eci)
+      {
+        TNode t = *eci;
+        if (t.getKind() == Kind::STORE)
+        {
+          TNode childRep = d_ee->getRepresentative(t[0]);
+          parentStores[childRep].push_back(t);
+        }
+      }
+    }
+  }
+
+  for (set<Node>::iterator si = termSet.begin(); si != termSet.end(); ++si)
+  {
+    Node n = *si;
+    if (n.getKind() != Kind::SELECT)
+    {
+      continue;
+    }
+    TNode idx = n[1];
+    // Walk through array reps, following store chains and EE merges
+    // in both directions.
+    std::vector<TNode> visit;
+    std::unordered_set<TNode> visited;
+    visit.push_back(d_ee->getRepresentative(n[0]));
+    while (!visit.empty())
+    {
+      TNode arrRep = visit.back();
+      visit.pop_back();
+      if (!visited.insert(arrRep).second)
+      {
+        continue;
+      }
+      // Downward: iterate stores in this EQ class, follow to children.
+      eq::EqClassIterator eci(arrRep, d_ee);
+      for (; !eci.isFinished(); ++eci)
+      {
+        TNode t = *eci;
+        if (t.getKind() == Kind::STORE)
+        {
+          if (!d_ee->areEqual(idx, t[1]))
+          {
+            TNode baseRep = d_ee->getRepresentative(t[0]);
+            selects[baseRep].push_back(n);
+            visit.push_back(baseRep);
+          }
+        }
+      }
+      // Upward: find stores whose child is in this class.
+      auto pit = parentStores.find(arrRep);
+      if (pit != parentStores.end())
+      {
+        for (TNode s : pit->second)
+        {
+          if (!d_ee->areEqual(idx, s[1]))
+          {
+            TNode storeRep = d_ee->getRepresentative(s);
+            selects[storeRep].push_back(n);
+            visit.push_back(storeRep);
+          }
+        }
+      }
+    }
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// CARE GRAPH
+/////////////////////////////////////////////////////////////////////////////
+
+void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
+{
+  for (const auto& [t1, t2] : d_pendingCarePairs)
+  {
+    if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
+    {
+      continue;
+    }
+    if (!d_ee->isTriggerTerm(t1, THEORY_ARRAYS)
+        || !d_ee->isTriggerTerm(t2, THEORY_ARRAYS))
+    {
+      continue;
+    }
+    TNode s1 = d_ee->getTriggerTermRepresentative(t1, THEORY_ARRAYS);
+    TNode s2 = d_ee->getTriggerTermRepresentative(t2, THEORY_ARRAYS);
+    if (s1 == s2)
+    {
+      continue;
+    }
+    EqualityStatus es = d_valuation.getEqualityStatus(s1, s2);
+    if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED
+        || es == EQUALITY_FALSE_IN_MODEL)
+    {
+      continue;
+    }
+    Trace("arrays::sharing")
+        << "AEXT care pair: " << t1 << " vs " << t2 << " shared=(" << s1 << ", "
+        << s2 << ")" << std::endl;
+    addCarePair(s1, s2);
+  }
 }
 
 }  // namespace arrays

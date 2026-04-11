@@ -49,12 +49,9 @@
 
 #include "context/cdhashset.h"
 #include "context/cdlist.h"
-#include "smt/env_obj.h"
+#include "theory/arrays/array_solver.h"
 #include "theory/arrays/inference_manager.h"
 #include "theory/arrays/path_edge.h"
-#include "theory/theory.h"
-#include "theory/theory_state.h"
-#include "theory/uf/equality_engine.h"
 #include "util/statistics_stats.h"
 
 namespace cvc5::internal {
@@ -69,72 +66,33 @@ namespace arrays {
  * generation with a propagation-based approach that only generates lemmas
  * on conflicts.
  */
-class AextArraySolver : protected EnvObj
+class AextArraySolver : public ArraySolver
 {
   typedef context::CDHashSet<Node> NodeSet;
 
  public:
-  AextArraySolver(Env& env, TheoryState& state, InferenceManager& im);
-  ~AextArraySolver();
+  AextArraySolver(Env& env,
+                  TheoryState& state,
+                  InferenceManager& im,
+                  Valuation valuation,
+                  eq::EqualityEngine& mayEqualEE,
+                  DefValMap& defValues);
+  ~AextArraySolver() override;
 
-  //--------------------------------- initialization
-  /**
-   * Complete initialization, called from TheoryArrays::finishInit().
-   * @param ee pointer to the official equality engine
-   */
-  void finishInit(eq::EqualityEngine* ee);
-  //--------------------------------- end initialization
-
-  //--------------------------------- term registration
-  /**
-   * Register a SELECT (array read) term (InitR rule).
-   * @param node a term of the form select(a, i)
-   */
-  void preRegisterSelect(TNode node);
-  /**
-   * Register a STORE (array write) term (InitW rule).
-   * Creates the virtual read select(store(a, i, v), i) and asserts RIntro1.
-   * @param node a term of the form store(a, i, v)
-   */
-  void preRegisterStore(TNode node);
-  //--------------------------------- end term registration
-
-  //--------------------------------- notifications
-  /** Notify that arrays a and b have been merged in the equality engine. */
-  void notifyMerge(TNode a, TNode b);
-  /**
-   * Notify that arrays a and b are disequal.
-   * @param reason the fact representing the disequality (not (= a b))
-   */
-  void notifyDisequality(TNode a, TNode b, TNode reason);
-  //--------------------------------- end notifications
-
-  //--------------------------------- main solving
-  /**
-   * Main theory check, called from TheoryArrays::postCheck().
-   * For each registered select, propagates it through store chains (RowD/RowU)
-   * and checks for conflicts (CongR/AccessStore). Then handles disequalities
-   * (DisEq).
-   */
-  void check(Theory::Effort level);
-  //--------------------------------- end main solving
-
-  //--------------------------------- care graph support
-  /**
-   * Return the index pairs whose equality is undecided, collected during
-   * the most recent check() call.  Used by TheoryArrays::computeCareGraph()
-   * to emit care pairs instead of sending explicit split lemmas.
-   */
-  const std::vector<std::pair<TNode, TNode>>& getPendingCarePairs() const
-  {
-    return d_pendingCarePairs;
-  }
-  //--------------------------------- end care graph support
-
-  //--------------------------------- model
-  /** Collect model values for array terms. */
-  bool collectModelValues(TheoryModel* m, const std::set<Node>& termSet);
-  //--------------------------------- end model
+  //--------------------------------- ArraySolver interface
+  void finishInit(eq::EqualityEngine* ee) override;
+  void preRegisterSelect(TNode node) override;
+  void preRegisterStore(TNode node) override;
+  void preRegisterStoreAll(TNode node) override;
+  void eqNotifyMerge(TNode a, TNode b) override;
+  void postCheck(Theory::Effort level) override;
+  void notifyArrayDisequality(TNode a, TNode b, TNode fact) override;
+  void computeRelevantTerms(std::set<Node>& termSet) override;
+  void augmentModelSelects(std::map<Node, std::vector<Node>>& selects,
+                           const std::set<Node>& termSet) override;
+  void computeCareGraph(AddCarePairFn addCarePair) override;
+  std::string identify() const override;
+  //--------------------------------- end ArraySolver interface
 
  private:
   /**
@@ -150,37 +108,20 @@ class AextArraySolver : protected EnvObj
 
   //--------------------------------- propagation (core AEXT calculus)
   /**
+   * Main theory check, called from postCheck().
+   * For each registered select, propagates it through store chains (RowD/RowU)
+   * and checks for conflicts (CongR/AccessStore). Then handles disequalities
+   * (DisEq).
+   */
+  void check(Theory::Effort level);
+  /**
    * Propagate a single select through store chains (RowD/RowU).
-   *
-   * Traverses the store chain from the select's array, passing through
-   * stores when the read index is known disequal from the store index.
-   * At each array reached, records the read in d_arrayModels and checks
-   * for congruence conflicts.
-   *
-   * - CongR: two reads at the same (array, index) with different values
-   *   generates: (pathConds1 /\ pathConds2 /\ i1=i2) => sel1 = sel2
-   * - AccessStore: a read reaches a store with matching index but wrong value
-   *   generates: (pathConds /\ i=j) => sel = storeValue
-   *
-   * No new terms are introduced; only existing select terms and store
-   * values are related.
-   *
-   * @param select the select term to propagate
    */
   void checkAccess(TNode select);
   /**
    * Find a path from a select's starting array to a target array
    * representative through the store graph (RowD/RowU edges), and
-   * extract the path conditions.  Uses BFS for shortest path.
-   *
-   * This is called on-demand when a conflict is detected (CongR,
-   * AccessStore, or AccessConstArray), avoiding the need to pre-record
-   * predecessor edges during propagation.
-   *
-   * @param select the select term whose path to reconstruct
-   * @param targetRep the target array representative
-   * @param conds output vector for path conditions
-   * @return the entry array at targetRep (the specific node reached)
+   * extract the path conditions.
    */
   TNode findPathConditions(TNode select,
                            TNode targetRep,
@@ -188,38 +129,26 @@ class AextArraySolver : protected EnvObj
                            std::vector<PathEdge>* edges = nullptr);
   /**
    * RIntro2 theory propagation.
-   *
-   * For each STORE term `n = store(c, k, v)`, scan existing SELECT terms
-   * for pairs (r1, r2) with rep(r1[0]) = rep(n), rep(r2[0]) = rep(c), and
-   * rep(r1[1]) = rep(r2[1]), where the read index is currently entailed
-   * disequal from `k`.  Asserts r1 = r2 as an internal fact, justified by
-   * the array equalities, the index equality, and the index disequality.
-   *
-   * Uses only existing SELECT terms (no new reads introduced).
    */
   void propagateRIntro2();
   /**
    * Process array disequalities (DisEq rule).
-   * For each disequality a != b, creates a witness index k and generates:
-   *   (a != b) => select(a, k) != select(b, k)
    */
   void checkDisequalities();
   /**
    * Build the parent store map for the current check.
-   * Maps each array representative to the list of STORE terms whose base
-   * (child[0]) is in that equivalence class. Used for RowU propagation.
    */
   void buildParentMap();
   /** Compute active array representatives for RowU gating. */
   void computeActiveArrays();
   //--------------------------------- end propagation
 
-  /** Reference to the theory state */
-  TheoryState& d_state;
-  /** Reference to the inference manager */
-  InferenceManager& d_im;
-  /** Pointer to the equality engine (set in finishInit) */
-  eq::EqualityEngine* d_ee;
+  /**
+   * Lightweight merge for model construction support.
+   * Maintains d_mayEqualEqualityEngine and d_defValues without
+   * generating Row lemmas or updating d_infoMap.
+   */
+  void mergeArraysModelOnly(TNode a, TNode b);
 
   /** All registered SELECT terms (context-dependent) */
   context::CDList<TNode> d_selects;
@@ -233,58 +162,23 @@ class AextArraySolver : protected EnvObj
   NodeSet d_lemmaCache;
 
   //--------------------------------- per-check data structures
-  /**
-   * Index pairs whose equality is undecided, collected during checkAccess().
-   * Used by TheoryArrays::computeCareGraph() to emit care pairs.
-   * Per-check (not context-dependent) so that pairs are recomputed on
-   * each check() call.
-   */
   std::vector<std::pair<TNode, TNode>> d_pendingCarePairs;
-  /** Deduplication set for d_pendingCarePairs within a single check() */
   std::unordered_set<Node> d_pendingCarePairCache;
-  /** Cache of selects already processed in current check() call */
   std::unordered_set<Node> d_checkAccessCache;
-  /**
-   * Array models (rebuilt each check() call).
-   * For each array representative, maps index representative to the
-   * PropagatedRead that reached it. Used for congruence detection:
-   * if a second read arrives at the same (array, index) with a different
-   * value, a CongR lemma is generated.
-   */
   std::unordered_map<TNode, std::unordered_map<TNode, PropagatedRead>>
       d_arrayModels;
-  /**
-   * Parent store map (rebuilt each check() call).
-   * Maps array representative -> STORE terms whose base is in that
-   * equivalence class. Used for RowU propagation.
-   */
   std::unordered_map<TNode, std::vector<TNode>> d_parentStores;
-  /**
-   * Active array representatives for RowU gating (rebuilt each check()).
-   * An array rep is active if its EQ class has size > 1 (meaning an
-   * equality merged it with another term), or if it is transitively
-   * reachable downward through store[0] edges from an active rep.
-   * RowU propagation is only performed from active array reps.
-   */
   std::unordered_set<TNode> d_activeArrays;
   //--------------------------------- end per-check data structures
 
   //--------------------------------- statistics
-  /** Number of congruence lemmas (CongR) */
   IntStat d_numCongruenceLemmas;
-  /** Number of access-store lemmas */
   IntStat d_numAccessStoreLemmas;
-  /** Number of disequality witness lemmas (DisEq) */
   IntStat d_numDisequalityLemmas;
-  /** Number of constant array lemmas (Roc) */
   IntStat d_numConstArrayLemmas;
-  /** Number of check() calls */
   IntStat d_numCheckCalls;
-  /** Number of downward propagation steps (RowD) */
   IntStat d_numPropagationsDown;
-  /** Number of upward propagation steps (RowU) */
   IntStat d_numPropagationsUp;
-  /** Number of RIntro2 theory propagations */
   IntStat d_numRIntro2Propagations;
   //--------------------------------- end statistics
 };
