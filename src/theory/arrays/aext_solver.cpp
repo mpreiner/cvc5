@@ -394,6 +394,23 @@ void AextArraySolver::checkAccess(TNode select)
         continue;
       }
       model[indexRep] = {select, index};
+
+      // Generate care pairs between this read's index and all other
+      // reads at this array whose indices are not known equal or disequal.
+      // Without this, reads propagated through store chains may reach an
+      // array with existing reads at indices that coincide in the model
+      // but were never split, leading to inconsistent models.
+      for (const auto& [otherIdxRep, otherRead] : model)
+      {
+        if (otherIdxRep == indexRep) continue;
+        if (d_ee->areDisequal(index, otherRead.index, false)) continue;
+        Node split = index.eqNode(otherRead.index);
+        if (!rewrite(split).isConst()
+            && d_pendingCarePairCache.insert(split).second)
+        {
+          d_pendingCarePairs.emplace_back(index, otherRead.index);
+        }
+      }
     }
 
     // Step 2: Check for AccessStore (matching index by representative).
