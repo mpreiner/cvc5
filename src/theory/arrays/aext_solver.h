@@ -163,6 +163,16 @@ class AextArraySolver : public ArraySolver
 
   //--------------------------------- per-check data structures
   std::vector<std::pair<TNode, TNode>> d_pendingCarePairs;
+  /**
+   * Cached read-read care pair list (trigger-term rep pairs), built lazily
+   * by computeCareGraph(). Reused across combination rounds as long as
+   * d_arrayModelsHash still matches the current d_arrayModels content.
+   */
+  std::vector<std::pair<TNode, TNode>> d_readReadIndexPairs;
+  /** Whether d_readReadIndexPairs is populated and matches d_arrayModels. */
+  bool d_readReadIndexPairsValid;
+  /** Hash of d_arrayModels for which d_readReadIndexPairs was built. */
+  size_t d_arrayModelsHash;
   std::unordered_set<Node> d_pendingCarePairCache;
   std::unordered_set<Node> d_checkAccessCache;
   std::unordered_map<TNode, std::unordered_map<TNode, PropagatedRead>>
