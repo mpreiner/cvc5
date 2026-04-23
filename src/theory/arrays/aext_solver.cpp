@@ -395,28 +395,9 @@ void AextArraySolver::checkAccess(TNode select)
       }
       model[indexRep] = {select, index};
 
-      // Generate care pairs between this read's index and all other
-      // reads at this array whose indices are not known equal or disequal.
-      // Without this, theory combination may assign two indices the same
-      // model value without the arrays theory ever learning they are equal,
-      // leading to inconsistent array models. Restrict to shared (trigger)
-      // index pairs: non-shared indices cannot participate in theory
-      // combination and would otherwise explode into explicit SAT splits.
-      if (d_ee->isTriggerTerm(index, THEORY_ARRAYS))
-      {
-        for (const auto& [otherIdxRep, otherRead] : model)
-        {
-          if (otherIdxRep == indexRep) continue;
-          if (!d_ee->isTriggerTerm(otherRead.index, THEORY_ARRAYS)) continue;
-          if (d_ee->areDisequal(index, otherRead.index, false)) continue;
-          Node split = index.eqNode(otherRead.index);
-          if (!rewrite(split).isConst()
-              && d_pendingCarePairCache.insert(split).second)
-          {
-            d_pendingCarePairs.emplace_back(index, otherRead.index);
-          }
-        }
-      }
+      // Read-read care pairs between trigger-term indices are emitted from
+      // computeCareGraph() in a single pass over d_arrayModels, to avoid
+      // O(N^2) work per propagation step at arrays with many reads.
     }
 
     // Step 2: Check for AccessStore (matching index by representative).
@@ -965,6 +946,48 @@ void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
         << "AEXT care pair: " << t1 << " vs " << t2 << " shared=(" << s1 << ", "
         << s2 << ")" << std::endl;
     addCarePair(s1, s2);
+  }
+  // Read-read care pairs: pairwise between trigger-term index reads at the
+  // same array. Generated here so we walk d_arrayModels once per combination
+  // round instead of K^2 work per propagation step. Trigger-term reps are
+  // precomputed per array to avoid repeated EE lookups on each pair.
+  std::vector<TNode> triggerIndices;
+  std::vector<TNode> triggerReps;
+  for (const auto& [arrayRep, model] : d_arrayModels)
+  {
+    triggerIndices.clear();
+    triggerReps.clear();
+    for (const auto& [idxRep, read] : model)
+    {
+      if (d_ee->isTriggerTerm(read.index, THEORY_ARRAYS))
+      {
+        triggerIndices.push_back(read.index);
+        triggerReps.push_back(
+            d_ee->getTriggerTermRepresentative(read.index, THEORY_ARRAYS));
+      }
+    }
+    for (size_t i = 0, sz = triggerIndices.size(); i < sz; ++i)
+    {
+      TNode idx1 = triggerIndices[i];
+      TNode s1 = triggerReps[i];
+      for (size_t j = i + 1; j < sz; ++j)
+      {
+        TNode s2 = triggerReps[j];
+        if (s1 == s2) continue;
+        TNode idx2 = triggerIndices[j];
+        if (d_ee->areDisequal(idx1, idx2, false)) continue;
+        EqualityStatus es = d_valuation.getEqualityStatus(s1, s2);
+        if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED
+            || es == EQUALITY_FALSE_IN_MODEL)
+        {
+          continue;
+        }
+        Trace("arrays::sharing")
+            << "AEXT care pair (read-read): " << idx1 << " vs " << idx2
+            << " shared=(" << s1 << ", " << s2 << ")" << std::endl;
+        addCarePair(s1, s2);
+      }
+    }
   }
 }
 
