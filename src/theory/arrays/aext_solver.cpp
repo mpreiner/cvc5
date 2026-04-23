@@ -397,18 +397,24 @@ void AextArraySolver::checkAccess(TNode select)
 
       // Generate care pairs between this read's index and all other
       // reads at this array whose indices are not known equal or disequal.
-      // Without this, reads propagated through store chains may reach an
-      // array with existing reads at indices that coincide in the model
-      // but were never split, leading to inconsistent models.
-      for (const auto& [otherIdxRep, otherRead] : model)
+      // Without this, theory combination may assign two indices the same
+      // model value without the arrays theory ever learning they are equal,
+      // leading to inconsistent array models. Restrict to shared (trigger)
+      // index pairs: non-shared indices cannot participate in theory
+      // combination and would otherwise explode into explicit SAT splits.
+      if (d_ee->isTriggerTerm(index, THEORY_ARRAYS))
       {
-        if (otherIdxRep == indexRep) continue;
-        if (d_ee->areDisequal(index, otherRead.index, false)) continue;
-        Node split = index.eqNode(otherRead.index);
-        if (!rewrite(split).isConst()
-            && d_pendingCarePairCache.insert(split).second)
+        for (const auto& [otherIdxRep, otherRead] : model)
         {
-          d_pendingCarePairs.emplace_back(index, otherRead.index);
+          if (otherIdxRep == indexRep) continue;
+          if (!d_ee->isTriggerTerm(otherRead.index, THEORY_ARRAYS)) continue;
+          if (d_ee->areDisequal(index, otherRead.index, false)) continue;
+          Node split = index.eqNode(otherRead.index);
+          if (!rewrite(split).isConst()
+              && d_pendingCarePairCache.insert(split).second)
+          {
+            d_pendingCarePairs.emplace_back(index, otherRead.index);
+          }
         }
       }
     }
