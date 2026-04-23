@@ -53,7 +53,9 @@ AextArraySolver::AextArraySolver(Env& env,
       d_numPropagationsUp(statisticsRegistry().registerInt(
           "theory::arrays::aext::numPropagationsUp")),
       d_numRIntro2Propagations(statisticsRegistry().registerInt(
-          "theory::arrays::aext::numRIntro2Propagations"))
+          "theory::arrays::aext::numRIntro2Propagations")),
+      d_readReadIndexPairsValid(false),
+      d_arrayModelsHash(0)
 {
 }
 
@@ -201,7 +203,10 @@ void AextArraySolver::check(Theory::Effort level)
                          << " selects and " << d_stores.size() << " stores"
                          << std::endl;
 
-  // Clear per-check data structures
+  // Clear per-check data structures. d_readReadIndexPairs is not cleared
+  // here; computeCareGraph() invalidates it based on a hash of
+  // d_arrayModels, so that combination rounds without meaningful model
+  // changes can reuse the cached pairs.
   d_pendingCarePairs.clear();
   d_pendingCarePairCache.clear();
   d_checkAccessCache.clear();
@@ -919,6 +924,28 @@ void AextArraySolver::augmentModelSelects(
 
 void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
 {
+  // Check whether cached read-read pairs are still valid for the current
+  // d_arrayModels. Between two consecutive combination rounds, check() may
+  // have re-propagated but often produces the same set of (arrayRep,
+  // indexRep) entries, so the cache can be reused. Use a commutative hash
+  // so iteration order of the underlying unordered_maps does not matter.
+  size_t hash = d_arrayModels.size();
+  for (const auto& [arrayRep, model] : d_arrayModels)
+  {
+    size_t idxHash = 0;
+    for (const auto& [idxRep, read] : model)
+    {
+      idxHash += std::hash<TNode>()(idxRep);
+    }
+    hash += std::hash<TNode>()(arrayRep) * 31 + model.size() * 17 + idxHash;
+  }
+  if (hash != d_arrayModelsHash)
+  {
+    d_arrayModelsHash = hash;
+    d_readReadIndexPairs.clear();
+    d_readReadIndexPairsValid = false;
+  }
+
   for (const auto& [t1, t2] : d_pendingCarePairs)
   {
     if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
@@ -948,46 +975,56 @@ void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
     addCarePair(s1, s2);
   }
   // Read-read care pairs: pairwise between trigger-term index reads at the
-  // same array. Generated here so we walk d_arrayModels once per combination
-  // round instead of K^2 work per propagation step. Trigger-term reps are
-  // precomputed per array to avoid repeated EE lookups on each pair.
-  std::vector<TNode> triggerIndices;
-  std::vector<TNode> triggerReps;
-  for (const auto& [arrayRep, model] : d_arrayModels)
+  // same array. Populate d_readReadIndexPairs on the first call after each
+  // check() (O(K^2) per array, doing all EE-based filtering once) and reuse
+  // it across subsequent combination rounds until the next check()
+  // invalidates it. Between combination rounds without an intervening
+  // check(), EE is stable, so trigger-term reps and areEqual/areDisequal
+  // results do not change.
+  if (!d_readReadIndexPairsValid)
   {
-    triggerIndices.clear();
-    triggerReps.clear();
-    for (const auto& [idxRep, read] : model)
+    std::vector<TNode> triggerIndices;
+    std::vector<TNode> triggerReps;
+    for (const auto& [arrayRep, model] : d_arrayModels)
     {
-      if (d_ee->isTriggerTerm(read.index, THEORY_ARRAYS))
+      triggerIndices.clear();
+      triggerReps.clear();
+      for (const auto& [idxRep, read] : model)
       {
-        triggerIndices.push_back(read.index);
-        triggerReps.push_back(
-            d_ee->getTriggerTermRepresentative(read.index, THEORY_ARRAYS));
-      }
-    }
-    for (size_t i = 0, sz = triggerIndices.size(); i < sz; ++i)
-    {
-      TNode idx1 = triggerIndices[i];
-      TNode s1 = triggerReps[i];
-      for (size_t j = i + 1; j < sz; ++j)
-      {
-        TNode s2 = triggerReps[j];
-        if (s1 == s2) continue;
-        TNode idx2 = triggerIndices[j];
-        if (d_ee->areDisequal(idx1, idx2, false)) continue;
-        EqualityStatus es = d_valuation.getEqualityStatus(s1, s2);
-        if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED
-            || es == EQUALITY_FALSE_IN_MODEL)
+        if (d_ee->isTriggerTerm(read.index, THEORY_ARRAYS))
         {
-          continue;
+          triggerIndices.push_back(read.index);
+          triggerReps.push_back(
+              d_ee->getTriggerTermRepresentative(read.index, THEORY_ARRAYS));
         }
-        Trace("arrays::sharing")
-            << "AEXT care pair (read-read): " << idx1 << " vs " << idx2
-            << " shared=(" << s1 << ", " << s2 << ")" << std::endl;
-        addCarePair(s1, s2);
+      }
+      for (size_t i = 0, sz = triggerIndices.size(); i < sz; ++i)
+      {
+        TNode idx1 = triggerIndices[i];
+        TNode s1 = triggerReps[i];
+        for (size_t j = i + 1; j < sz; ++j)
+        {
+          TNode s2 = triggerReps[j];
+          if (s1 == s2) continue;
+          TNode idx2 = triggerIndices[j];
+          if (d_ee->areDisequal(idx1, idx2, false)) continue;
+          d_readReadIndexPairs.emplace_back(s1, s2);
+        }
       }
     }
+    d_readReadIndexPairsValid = true;
+  }
+  for (const auto& [s1, s2] : d_readReadIndexPairs)
+  {
+    EqualityStatus es = d_valuation.getEqualityStatus(s1, s2);
+    if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED
+        || es == EQUALITY_FALSE_IN_MODEL)
+    {
+      continue;
+    }
+    Trace("arrays::sharing") << "AEXT care pair (read-read): shared=(" << s1
+                             << ", " << s2 << ")" << std::endl;
+    addCarePair(s1, s2);
   }
 }
 
