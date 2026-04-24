@@ -983,27 +983,43 @@ void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
   // results do not change.
   if (!d_readReadIndexPairsValid)
   {
+    // For each arrayRep we partition reads in d_arrayModels[arrayRep] into:
+    //  - native: the read's original array is EE-equal to arrayRep
+    //    (i.e., read.select[0] EE-equal to arrayRep)
+    //  - propagated: reached arrayRep via a Row step through store chains
+    // TheoryArrays::computeCareGraph() already enumerates all pairs of
+    // reads in d_reads via its O(|d_reads|^2) checkPair loop, which emits
+    // every care pair whose read arrays share a may-equal class. Two
+    // native reads at arrayRep are both EE-equal (hence may-equal) to
+    // arrayRep, so TheoryArrays will already emit their pair. AEXT only
+    // needs to cover pairs where at least one side is a propagated read,
+    // since such reads can land at an arrayRep that is not EE-equal to
+    // the read's original array.
     std::vector<TNode> triggerIndices;
     std::vector<TNode> triggerReps;
+    std::vector<bool> isPropagated;
     for (const auto& [arrayRep, model] : d_arrayModels)
     {
       triggerIndices.clear();
       triggerReps.clear();
+      isPropagated.clear();
       for (const auto& [idxRep, read] : model)
       {
-        if (d_ee->isTriggerTerm(read.index, THEORY_ARRAYS))
-        {
-          triggerIndices.push_back(read.index);
-          triggerReps.push_back(
-              d_ee->getTriggerTermRepresentative(read.index, THEORY_ARRAYS));
-        }
+        if (!d_ee->isTriggerTerm(read.index, THEORY_ARRAYS)) continue;
+        triggerIndices.push_back(read.index);
+        triggerReps.push_back(
+            d_ee->getTriggerTermRepresentative(read.index, THEORY_ARRAYS));
+        isPropagated.push_back(d_ee->getRepresentative(read.select[0])
+                               != arrayRep);
       }
       for (size_t i = 0, sz = triggerIndices.size(); i < sz; ++i)
       {
         TNode idx1 = triggerIndices[i];
         TNode s1 = triggerReps[i];
+        bool prop1 = isPropagated[i];
         for (size_t j = i + 1; j < sz; ++j)
         {
+          if (!prop1 && !isPropagated[j]) continue;
           TNode s2 = triggerReps[j];
           if (s1 == s2) continue;
           TNode idx2 = triggerIndices[j];
