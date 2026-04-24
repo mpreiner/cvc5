@@ -806,6 +806,24 @@ void AextArraySolver::checkDisequalities()
     TNode a = fact[0][0];
     TNode b = fact[0][1];
 
+    // Cap witness lemmas per canonical (rep_a, rep_b) pair. Once the cap is
+    // reached, further facts mapping to the same pair are covered via EE
+    // congruence by one of the already-emitted lemmas; emitting more only
+    // bloats the SAT clause database with duplicate-modulo-congruence
+    // extensionality axioms. The cap preserves SAT steering on small
+    // problems (where each fact's witness tends to be distinct) and caps
+    // blowup on larger ones (where many facts share a representative pair).
+    constexpr uint32_t kWitnessCapPerRepPair = 30;
+    TNode repA = d_ee->getRepresentative(a);
+    TNode repB = d_ee->getRepresentative(b);
+    Node repPair = repA < repB ? repA.eqNode(repB) : repB.eqNode(repA);
+    uint32_t& count = d_witnessRepPairCount[repPair];
+    if (count >= kWitnessCapPerRepPair)
+    {
+      continue;
+    }
+    ++count;
+
     Node k = SkolemCache::getExtIndexSkolem(nm, fact);
     Node ak = nm->mkNode(Kind::SELECT, a, k);
     Node bk = nm->mkNode(Kind::SELECT, b, k);
