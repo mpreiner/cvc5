@@ -158,6 +158,14 @@ class AextArraySolver : public ArraySolver
   context::CDList<Node> d_arrayDisequalities;
   /** Disequalities for which a witness has already been generated */
   NodeSet d_witnessDiseqs;
+  /**
+   * Per canonical (rep_a, rep_b) pair, the number of extensionality witness
+   * lemmas emitted so far. Once a cap is reached, further facts mapping to
+   * the same pair are skipped: they are covered via EE congruence by one
+   * of the already-emitted lemmas, and emitting more adds SAT clause bloat
+   * without new distinguishing information.
+   */
+  std::unordered_map<Node, uint32_t> d_witnessRepPairCount;
   /** Lemma deduplication cache (context-dependent) */
   NodeSet d_lemmaCache;
 
