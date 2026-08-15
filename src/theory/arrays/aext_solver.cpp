@@ -56,9 +56,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_numPropagationsUp(statisticsRegistry().registerInt(
           "theory::arrays::aext::numPropagationsUp")),
       d_numRIntro2Propagations(statisticsRegistry().registerInt(
-          "theory::arrays::aext::numRIntro2Propagations")),
-      d_readReadIndexPairsValid(false),
-      d_arrayModelsHash(0)
+          "theory::arrays::aext::numRIntro2Propagations"))
 {
 }
 
@@ -206,10 +204,9 @@ void AextArraySolver::check(Theory::Effort level)
                          << " selects and " << d_stores.size() << " stores"
                          << std::endl;
 
-  // Clear per-check data structures. d_readReadIndexPairs is not cleared
-  // here; computeCareGraph() invalidates it based on a hash of
-  // d_arrayModels, so that combination rounds without meaningful model
-  // changes can reuse the cached pairs.
+  // Clear per-check data structures. Everything here is rebuilt from
+  // scratch below, and is only read during this check() and the
+  // computeCareGraph() call that follows it.
   d_pendingCarePairs.clear();
   d_pendingCarePairCache.clear();
   d_checkAccessCache.clear();
@@ -983,28 +980,6 @@ void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
     }
   }
 
-  // Check whether cached read-read pairs are still valid for the current
-  // d_arrayModels. Between two consecutive combination rounds, check() may
-  // have re-propagated but often produces the same set of (arrayRep,
-  // indexRep) entries, so the cache can be reused. Use a commutative hash
-  // so iteration order of the underlying unordered_maps does not matter.
-  size_t hash = d_arrayModels.size();
-  for (const auto& [arrayRep, model] : d_arrayModels)
-  {
-    size_t idxHash = 0;
-    for (const auto& [idxRep, read] : model)
-    {
-      idxHash += std::hash<TNode>()(idxRep);
-    }
-    hash += std::hash<TNode>()(arrayRep) * 31 + model.size() * 17 + idxHash;
-  }
-  if (hash != d_arrayModelsHash)
-  {
-    d_arrayModelsHash = hash;
-    d_readReadIndexPairs.clear();
-    d_readReadIndexPairsValid = false;
-  }
-
   for (const auto& [t1, t2] : d_pendingCarePairs)
   {
     if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
@@ -1034,71 +1009,59 @@ void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
     addCarePair(s1, s2);
   }
   // Read-read care pairs: pairwise between trigger-term index reads at the
-  // same array. Populate d_readReadIndexPairs on the first call after each
-  // check() (O(K^2) per array, doing all EE-based filtering once) and reuse
-  // it across subsequent combination rounds until the next check()
-  // invalidates it. Between combination rounds without an intervening
-  // check(), EE is stable, so trigger-term reps and areEqual/areDisequal
-  // results do not change.
-  if (!d_readReadIndexPairsValid)
+  // same array.
+  //
+  // For each arrayRep we partition reads in d_arrayModels[arrayRep] into:
+  //  - native: the read's original array is EE-equal to arrayRep
+  //    (i.e., read.select[0] EE-equal to arrayRep)
+  //  - propagated: reached arrayRep via a Row step through store chains
+  // The d_selects sweep at the top of this method already enumerates all
+  // pairs of registered reads, which emits every care pair whose read
+  // arrays share a may-equal class. Two native reads at arrayRep are both
+  // EE-equal (hence may-equal) to arrayRep, so that sweep already emits
+  // their pair. What remains is to cover pairs where at least one side is
+  // a propagated read, since such reads can land at an arrayRep that is
+  // not EE-equal to the read's original array.
+  std::vector<TNode> triggerIndices;
+  std::vector<TNode> triggerReps;
+  std::vector<bool> isPropagated;
+  for (const auto& [arrayRep, model] : d_arrayModels)
   {
-    // For each arrayRep we partition reads in d_arrayModels[arrayRep] into:
-    //  - native: the read's original array is EE-equal to arrayRep
-    //    (i.e., read.select[0] EE-equal to arrayRep)
-    //  - propagated: reached arrayRep via a Row step through store chains
-    // The d_selects sweep at the top of this method already enumerates all
-    // pairs of registered reads, which emits every care pair whose read
-    // arrays share a may-equal class. Two native reads at arrayRep are both
-    // EE-equal (hence may-equal) to arrayRep, so that sweep already emits
-    // their pair. What remains is to cover pairs where at least one side is
-    // a propagated read, since such reads can land at an arrayRep that is
-    // not EE-equal to the read's original array.
-    std::vector<TNode> triggerIndices;
-    std::vector<TNode> triggerReps;
-    std::vector<bool> isPropagated;
-    for (const auto& [arrayRep, model] : d_arrayModels)
+    triggerIndices.clear();
+    triggerReps.clear();
+    isPropagated.clear();
+    for (const auto& [idxRep, read] : model)
     {
-      triggerIndices.clear();
-      triggerReps.clear();
-      isPropagated.clear();
-      for (const auto& [idxRep, read] : model)
+      if (!d_ee->isTriggerTerm(read.index, THEORY_ARRAYS)) continue;
+      triggerIndices.push_back(read.index);
+      triggerReps.push_back(
+          d_ee->getTriggerTermRepresentative(read.index, THEORY_ARRAYS));
+      isPropagated.push_back(d_ee->getRepresentative(read.select[0])
+                             != arrayRep);
+    }
+    for (size_t i = 0, sz = triggerIndices.size(); i < sz; ++i)
+    {
+      TNode idx1 = triggerIndices[i];
+      TNode s1 = triggerReps[i];
+      bool prop1 = isPropagated[i];
+      for (size_t j = i + 1; j < sz; ++j)
       {
-        if (!d_ee->isTriggerTerm(read.index, THEORY_ARRAYS)) continue;
-        triggerIndices.push_back(read.index);
-        triggerReps.push_back(
-            d_ee->getTriggerTermRepresentative(read.index, THEORY_ARRAYS));
-        isPropagated.push_back(d_ee->getRepresentative(read.select[0])
-                               != arrayRep);
-      }
-      for (size_t i = 0, sz = triggerIndices.size(); i < sz; ++i)
-      {
-        TNode idx1 = triggerIndices[i];
-        TNode s1 = triggerReps[i];
-        bool prop1 = isPropagated[i];
-        for (size_t j = i + 1; j < sz; ++j)
+        if (!prop1 && !isPropagated[j]) continue;
+        TNode s2 = triggerReps[j];
+        if (s1 == s2) continue;
+        TNode idx2 = triggerIndices[j];
+        if (d_ee->areDisequal(idx1, idx2, false)) continue;
+        EqualityStatus es = d_valuation.getEqualityStatus(s1, s2);
+        if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED
+            || es == EQUALITY_FALSE_IN_MODEL)
         {
-          if (!prop1 && !isPropagated[j]) continue;
-          TNode s2 = triggerReps[j];
-          if (s1 == s2) continue;
-          TNode idx2 = triggerIndices[j];
-          if (d_ee->areDisequal(idx1, idx2, false)) continue;
-          d_readReadIndexPairs.emplace_back(s1, s2);
+          continue;
         }
+        Trace("arrays::sharing") << "AEXT care pair (read-read): shared=(" << s1
+                                 << ", " << s2 << ")" << std::endl;
+        addCarePair(s1, s2);
       }
     }
-    d_readReadIndexPairsValid = true;
-  }
-  for (const auto& [s1, s2] : d_readReadIndexPairs)
-  {
-    EqualityStatus es = d_valuation.getEqualityStatus(s1, s2);
-    if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED
-        || es == EQUALITY_FALSE_IN_MODEL)
-    {
-      continue;
-    }
-    Trace("arrays::sharing") << "AEXT care pair (read-read): shared=(" << s1
-                             << ", " << s2 << ")" << std::endl;
-    addCarePair(s1, s2);
   }
 }
 
