@@ -39,6 +39,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_stores(context()),
       d_arrayDisequalities(context()),
       d_witnessDiseqs(context()),
+      d_witnessRepPairCount(context()),
       d_lemmaCache(context()),
       d_numCongruenceLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCongruenceLemmas")),
@@ -803,28 +804,38 @@ void AextArraySolver::checkDisequalities()
     {
       continue;
     }
-    d_witnessDiseqs.insert(fact);
 
     TNode a = fact[0][0];
     TNode b = fact[0][1];
 
     // Cap witness lemmas per canonical (rep_a, rep_b) pair. Once the cap is
-    // reached, further facts mapping to the same pair are covered via EE
-    // congruence by one of the already-emitted lemmas; emitting more only
-    // bloats the SAT clause database with duplicate-modulo-congruence
-    // extensionality axioms. The cap preserves SAT steering on small
-    // problems (where each fact's witness tends to be distinct) and caps
-    // blowup on larger ones (where many facts share a representative pair).
+    // reached, further facts mapping to the same pair are covered by one of
+    // the already-emitted lemmas: if fact f and an earlier fact f' both have
+    // representative pair (r_a, r_b) in the current equality engine state,
+    // then f's arrays are equal to f''s arrays, so the index witnessing
+    // f' witnesses f as well. Emitting more only bloats the SAT clause
+    // database with duplicate-modulo-congruence extensionality axioms. The
+    // cap preserves SAT steering on small problems (where each fact's
+    // witness tends to be distinct) and caps blowup on larger ones (where
+    // many facts share a representative pair).
+    //
+    // Note the count is context-dependent, so it only suppresses witnesses
+    // while we remain in the state that makes the argument above valid.
+    // Note also that a suppressed fact is deliberately NOT recorded in
+    // d_witnessDiseqs: we may have to emit its witness after backtracking,
+    // when the covering lemma no longer applies.
     constexpr uint32_t kWitnessCapPerRepPair = 30;
     TNode repA = d_ee->getRepresentative(a);
     TNode repB = d_ee->getRepresentative(b);
     Node repPair = repA < repB ? repA.eqNode(repB) : repB.eqNode(repA);
-    uint32_t& count = d_witnessRepPairCount[repPair];
+    auto itc = d_witnessRepPairCount.find(repPair);
+    uint32_t count = itc == d_witnessRepPairCount.end() ? 0 : (*itc).second;
     if (count >= kWitnessCapPerRepPair)
     {
       continue;
     }
-    ++count;
+    d_witnessRepPairCount[repPair] = count + 1;
+    d_witnessDiseqs.insert(fact);
 
     Node k = SkolemCache::getExtIndexSkolem(nm, fact);
     Node ak = nm->mkNode(Kind::SELECT, a, k);

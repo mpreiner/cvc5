@@ -47,6 +47,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "context/cdhashmap.h"
 #include "context/cdhashset.h"
 #include "context/cdlist.h"
 #include "theory/arrays/array_solver.h"
@@ -162,11 +163,18 @@ class AextArraySolver : public ArraySolver
   /**
    * Per canonical (rep_a, rep_b) pair, the number of extensionality witness
    * lemmas emitted so far. Once a cap is reached, further facts mapping to
-   * the same pair are skipped: they are covered via EE congruence by one
-   * of the already-emitted lemmas, and emitting more adds SAT clause bloat
-   * without new distinguishing information.
+   * the same pair are skipped: they are semantically covered by one of the
+   * already-emitted lemmas, and emitting more adds SAT clause bloat without
+   * new distinguishing information.
+   *
+   * This must be context-dependent. The coverage argument is only valid in
+   * an equality engine state where the two facts really do share a
+   * representative pair, i.e. exactly the scope in which the count was
+   * incremented. A non-context-dependent counter keeps counting across
+   * backtracking, and would then suppress the witness for a fact in a later
+   * branch where no emitted lemma covers it -- an unsound "sat".
    */
-  std::unordered_map<Node, uint32_t> d_witnessRepPairCount;
+  context::CDHashMap<Node, uint32_t> d_witnessRepPairCount;
   /** Lemma deduplication cache (context-dependent) */
   NodeSet d_lemmaCache;
 
