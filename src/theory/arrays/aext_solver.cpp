@@ -40,7 +40,9 @@ AextArraySolver::AextArraySolver(Env& env,
       d_arrayDisequalities(context()),
       d_witnessDiseqs(context()),
       d_witnessRepPairCount(context()),
-      d_lemmaCache(context()),
+      d_congruenceLemmaCache(context()),
+      d_rintro2LemmaCache(context()),
+      d_indexSplitCache(context()),
       d_numCongruenceLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCongruenceLemmas")),
       d_numAccessStoreLemmas(statisticsRegistry().registerInt(
@@ -259,7 +261,7 @@ void AextArraySolver::check(Theory::Effort level)
         continue;
       }
       Node split = t1.eqNode(t2);
-      if (d_lemmaCache.insert(split))
+      if (d_indexSplitCache.insert(split))
       {
         Trace("arrays::aext")
             << "Index split (non-shared): " << split << std::endl;
@@ -386,7 +388,9 @@ void AextArraySolver::checkAccess(TNode select)
           Node exp = nm->mkAnd(expVec);
           Trace("arrays::aext")
               << "CongR: " << exp << " => " << conc << std::endl;
-          if (d_lemmaCache.insert(conc))
+          // Keyed on the whole lemma: the same conclusion may be justified by
+          // several distinct path condition sets, and each one has to be sent.
+          if (d_congruenceLemmaCache.insert(exp.impNode(conc)))
           {
             d_im.arrayLemma(conc,
                             InferenceId::ARRAYS_AEXT_CONGRUENCE,
@@ -752,7 +756,15 @@ void AextArraySolver::propagateRIntro2()
       if (d_ee->areDisequal(j, k, true))
       {
         Node eq = rN.eqNode(rC);
-        if (!d_lemmaCache.insert(eq)) continue;
+        // Keyed on the conclusion alone, unlike CongR: this inference also
+        // asserts eq as an internal fact below, and an equality engine
+        // assertion can only be undone by popping the context that this cache
+        // lives in. So whenever the cache suppresses a re-derivation, eq still
+        // holds; there is nothing for a second guard to add.
+        if (!d_rintro2LemmaCache.insert(eq))
+        {
+          continue;
+        }
         std::vector<Node> expVec;
         if (rN[0] != store)
         {
