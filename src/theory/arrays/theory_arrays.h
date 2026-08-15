@@ -149,9 +149,6 @@ class TheoryArrays : public Theory
   MayEqualNotifyClass d_mayEqualNotify;
   eq::EqualityEngine d_mayEqualEqualityEngine;
 
-  // Helper for computeCareGraph
-  void checkPair(TNode r1, TNode r2);
-
  public:
   void notifySharedTerm(TNode t) override;
   void computeCareGraph() override;
@@ -249,9 +246,6 @@ class TheoryArrays : public Theory
   CDNodeSet d_sharedArrays;
   CDNodeSet d_sharedOther;
   context::CDO<bool> d_sharedTerms;
-
-  // Map from constant values to read terms (care graph)
-  context::CDList<TNode> d_reads;
 
   context::CDList<Node> d_modelConstraints;
   context::CDHashSet<Node> d_lemmasSaved;

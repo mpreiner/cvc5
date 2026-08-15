@@ -45,9 +45,9 @@ class ArraySolverDefault : public ArraySolver
                      Valuation valuation,
                      eq::EqualityEngine& mayEqualEE,
                      DefValMap& defValues,
+                     context::CDO<bool>& sharedTerms,
                      OutputChannel& out,
-                     PreRegCallback preRegCb,
-                     context::CDO<bool>& sharedTerms);
+                     PreRegCallback preRegCb);
   ~ArraySolverDefault() override;
 
   void finishInit(eq::EqualityEngine* ee) override;
@@ -115,15 +115,10 @@ class ArraySolverDefault : public ArraySolver
   /** Get next decision request for eager index splitting. */
   Node getNextDecisionRequest();
 
-  /** Check a pair of reads for the care graph. */
-  void checkPair(TNode r1, TNode r2, AddCarePairFn& addCarePair);
-
   /** Output channel for preferPhase/ensureLiteral. */
   OutputChannel& d_out;
   /** Callback for preregistering internally-created terms. */
   PreRegCallback d_preRegCb;
-  /** Reference to shared terms flag (owned by TheoryArrays). */
-  context::CDO<bool>& d_sharedTerms;
 
   /** True/false constants. */
   Node d_true;

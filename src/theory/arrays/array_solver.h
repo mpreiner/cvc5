@@ -25,6 +25,7 @@
 #include <set>
 
 #include "context/cdhashmap.h"
+#include "context/cdo.h"
 #include "smt/env_obj.h"
 #include "theory/theory.h"
 #include "theory/theory_state.h"
@@ -66,16 +67,8 @@ class ArraySolver : protected EnvObj
               InferenceManager& im,
               Valuation valuation,
               eq::EqualityEngine& mayEqualEE,
-              DefValMap& defValues)
-      : EnvObj(env),
-        d_state(state),
-        d_im(im),
-        d_valuation(valuation),
-        d_ee(nullptr),
-        d_mayEqualEqualityEngine(mayEqualEE),
-        d_defValues(defValues)
-  {
-  }
+              DefValMap& defValues,
+              context::CDO<bool>& sharedTerms);
 
   virtual ~ArraySolver() {}
 
@@ -158,6 +151,19 @@ class ArraySolver : protected EnvObj
   virtual std::string identify() const = 0;
 
  protected:
+  /**
+   * Check a pair of read terms r1, r2 for the care graph, and add the care
+   * pair for their indices if their equality is still undecided and their
+   * arrays may be equal.
+   *
+   * This is shared infrastructure: both solvers need the same per-pair test,
+   * they only differ in how they enumerate the candidate pairs (see the
+   * respective computeCareGraph implementations). The index of r1 must be a
+   * trigger term for THEORY_ARRAYS; callers are responsible for filtering
+   * that before calling.
+   */
+  void checkPair(TNode r1, TNode r2, AddCarePairFn& addCarePair);
+
   /** Reference to the theory state */
   TheoryState& d_state;
   /** Reference to the inference manager */
@@ -171,6 +177,12 @@ class ArraySolver : protected EnvObj
   eq::EqualityEngine& d_mayEqualEqualityEngine;
   /** Reference to the default values map (shared, owned by TheoryArrays) */
   DefValMap& d_defValues;
+  /**
+   * Whether any non-array shared term has been notified (shared, owned by
+   * TheoryArrays). If false, no index can be a trigger term, so the care
+   * graph read sweeps can be skipped entirely.
+   */
+  context::CDO<bool>& d_sharedTerms;
 };
 
 }  // namespace arrays

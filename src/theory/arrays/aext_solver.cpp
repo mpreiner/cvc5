@@ -31,8 +31,10 @@ AextArraySolver::AextArraySolver(Env& env,
                                  InferenceManager& im,
                                  Valuation valuation,
                                  eq::EqualityEngine& mayEqualEE,
-                                 DefValMap& defValues)
-    : ArraySolver(env, state, im, valuation, mayEqualEE, defValues),
+                                 DefValMap& defValues,
+                                 context::CDO<bool>& sharedTerms)
+    : ArraySolver(
+        env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
       d_selects(context()),
       d_stores(context()),
       d_arrayDisequalities(context()),
@@ -942,6 +944,34 @@ void AextArraySolver::augmentModelSelects(
 
 void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
 {
+  // Native read pairs: all pairs of registered reads whose index is a trigger
+  // term. This is AEXT's counterpart of the bucketed sweep that
+  // ArraySolverDefault runs over its own read list. AEXT keeps every read in
+  // d_selects -- including the virtual reads select(store(a,i,v), i) created
+  // by InitW, which are never routed through TheoryArrays::preRegisterSelect
+  // -- so we sweep that list directly.
+  if (d_sharedTerms)
+  {
+    size_t sz = d_selects.size();
+    for (size_t i = 0; i < sz; ++i)
+    {
+      TNode r1 = d_selects[i];
+      if (!d_ee->hasTerm(r1) || !d_ee->isTriggerTerm(r1[1], THEORY_ARRAYS))
+      {
+        continue;
+      }
+      for (size_t j = i + 1; j < sz; ++j)
+      {
+        TNode r2 = d_selects[j];
+        if (!d_ee->hasTerm(r2))
+        {
+          continue;
+        }
+        checkPair(r1, r2, addCarePair);
+      }
+    }
+  }
+
   // Check whether cached read-read pairs are still valid for the current
   // d_arrayModels. Between two consecutive combination rounds, check() may
   // have re-propagated but often produces the same set of (arrayRep,
@@ -1005,14 +1035,13 @@ void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
     //  - native: the read's original array is EE-equal to arrayRep
     //    (i.e., read.select[0] EE-equal to arrayRep)
     //  - propagated: reached arrayRep via a Row step through store chains
-    // TheoryArrays::computeCareGraph() already enumerates all pairs of
-    // reads in d_reads via its O(|d_reads|^2) checkPair loop, which emits
-    // every care pair whose read arrays share a may-equal class. Two
-    // native reads at arrayRep are both EE-equal (hence may-equal) to
-    // arrayRep, so TheoryArrays will already emit their pair. AEXT only
-    // needs to cover pairs where at least one side is a propagated read,
-    // since such reads can land at an arrayRep that is not EE-equal to
-    // the read's original array.
+    // The d_selects sweep at the top of this method already enumerates all
+    // pairs of registered reads, which emits every care pair whose read
+    // arrays share a may-equal class. Two native reads at arrayRep are both
+    // EE-equal (hence may-equal) to arrayRep, so that sweep already emits
+    // their pair. What remains is to cover pairs where at least one side is
+    // a propagated read, since such reads can land at an arrayRep that is
+    // not EE-equal to the read's original array.
     std::vector<TNode> triggerIndices;
     std::vector<TNode> triggerReps;
     std::vector<bool> isPropagated;
