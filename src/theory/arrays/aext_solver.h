@@ -76,7 +76,8 @@ class AextArraySolver : public ArraySolver
                   InferenceManager& im,
                   Valuation valuation,
                   eq::EqualityEngine& mayEqualEE,
-                  DefValMap& defValues);
+                  DefValMap& defValues,
+                  context::CDO<bool>& sharedTerms);
   ~AextArraySolver() override;
 
   //--------------------------------- ArraySolver interface

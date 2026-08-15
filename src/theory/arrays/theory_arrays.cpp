@@ -73,7 +73,6 @@ TheoryArrays::TheoryArrays(Env& env,
       d_sharedArrays(context()),
       d_sharedOther(context()),
       d_sharedTerms(context(), false),
-      d_reads(context()),
       d_modelConstraints(context()),
       d_lemmasSaved(context()),
       d_defValues(context())
@@ -98,7 +97,8 @@ TheoryArrays::TheoryArrays(Env& env,
                                          d_im,
                                          d_valuation,
                                          d_mayEqualEqualityEngine,
-                                         d_defValues));
+                                         d_defValues,
+                                         d_sharedTerms));
   }
   else
   {
@@ -109,9 +109,9 @@ TheoryArrays::TheoryArrays(Env& env,
         d_valuation,
         d_mayEqualEqualityEngine,
         d_defValues,
+        d_sharedTerms,
         out,
-        [this](TNode n) { preRegisterTermInternal(n); },
-        d_sharedTerms));
+        [this](TNode n) { preRegisterTermInternal(n); }));
   }
 }
 
@@ -451,9 +451,6 @@ void TheoryArrays::preRegisterTermInternal(TNode node)
 
       Assert((d_isPreRegistered.insert(node), true));
 
-      // Record read in shared list for care graph (theory combination)
-      d_reads.push_back(node);
-
       // Delegate to solver
       d_internal->preRegisterSelect(node);
       break;
@@ -543,97 +540,6 @@ void TheoryArrays::notifySharedTerm(TNode t)
   }
 }
 
-void TheoryArrays::checkPair(TNode r1, TNode r2)
-{
-  Trace("arrays::sharing")
-      << "TheoryArrays::computeCareGraph(): checking reads " << r1 << " and "
-      << r2 << std::endl;
-
-  TNode x = r1[1];
-  TNode y = r2[1];
-  Assert(d_equalityEngine->isTriggerTerm(x, THEORY_ARRAYS));
-
-  if (d_equalityEngine->hasTerm(x) && d_equalityEngine->hasTerm(y)
-      && (d_equalityEngine->areEqual(x, y)
-          || d_equalityEngine->areDisequal(x, y, false)))
-  {
-    Trace("arrays::sharing")
-        << "TheoryArrays::computeCareGraph(): equality known, skipping"
-        << std::endl;
-    return;
-  }
-
-  if (d_equalityEngine->areEqual(r1, r2))
-  {
-    Trace("arrays::sharing")
-        << "TheoryArrays::computeCareGraph(): equal, skipping" << std::endl;
-    return;
-  }
-
-  if (r1[0] != r2[0])
-  {
-    Assert(d_mayEqualEqualityEngine.hasTerm(r1[0])
-           && d_mayEqualEqualityEngine.hasTerm(r2[0]));
-    if (r1[0].getType() != r2[0].getType()
-        || d_equalityEngine->areDisequal(r1[0], r2[0], false))
-    {
-      Trace("arrays::sharing")
-          << "TheoryArrays::computeCareGraph(): arrays can't be equal, "
-             "skipping"
-          << std::endl;
-      return;
-    }
-    else if (!d_mayEqualEqualityEngine.areEqual(r1[0], r2[0]))
-    {
-      return;
-    }
-  }
-
-  if (!d_equalityEngine->isTriggerTerm(y, THEORY_ARRAYS))
-  {
-    Trace("arrays::sharing")
-        << "TheoryArrays::computeCareGraph(): not connected to shared terms, "
-           "skipping"
-        << std::endl;
-    return;
-  }
-
-  TNode x_shared =
-      d_equalityEngine->getTriggerTermRepresentative(x, THEORY_ARRAYS);
-  TNode y_shared =
-      d_equalityEngine->getTriggerTermRepresentative(y, THEORY_ARRAYS);
-  EqualityStatus eqStatusDomain =
-      d_valuation.getEqualityStatus(x_shared, y_shared);
-  switch (eqStatusDomain)
-  {
-    case EQUALITY_TRUE_AND_PROPAGATED: DebugUnhandled(); break;
-    case EQUALITY_TRUE:
-      Trace("arrays::sharing")
-          << "TheoryArrays::computeCareGraph(): missed propagation"
-          << std::endl;
-      break;
-    case EQUALITY_FALSE_AND_PROPAGATED:
-      Trace("arrays::sharing")
-          << "TheoryArrays::computeCareGraph(): checkPair called when false "
-             "in model"
-          << std::endl;
-      DebugUnhandled();
-      break;
-    case EQUALITY_FALSE: CVC5_FALLTHROUGH;
-    case EQUALITY_FALSE_IN_MODEL:
-      Trace("arrays::sharing")
-          << "TheoryArrays::computeCareGraph(): checkPair called when false "
-             "in model"
-          << std::endl;
-      return;
-    default: break;
-  }
-
-  Trace("arrays::sharing")
-      << "TheoryArrays::computeCareGraph(): adding to care-graph" << std::endl;
-  addCarePair(x_shared, y_shared);
-}
-
 void TheoryArrays::computeCareGraph()
 {
   // Shared array variable care pairs (always runs)
@@ -663,31 +569,11 @@ void TheoryArrays::computeCareGraph()
     }
   }
 
-  // Shared read-pair care graph (theory combination infrastructure).
-  // For each pair of reads with undecided index equality, add a care pair
-  // so the theory combination framework can split on it.
-  if (d_sharedTerms)
-  {
-    unsigned size = d_reads.size();
-    for (unsigned i = 0; i < size; ++i)
-    {
-      TNode r1 = d_reads[i];
-      Assert(d_equalityEngine->hasTerm(r1));
-      TNode x = r1[1];
-      if (!d_equalityEngine->isTriggerTerm(x, THEORY_ARRAYS))
-      {
-        continue;
-      }
-      for (unsigned j = i + 1; j < size; ++j)
-      {
-        TNode r2 = d_reads[j];
-        Assert(d_equalityEngine->hasTerm(r2));
-        checkPair(r1, r2);
-      }
-    }
-  }
-
-  // Solver-specific care graph
+  // Read-pair care graph. This is solver-specific: the two solvers keep
+  // their read lists in different shapes and enumerate candidate pairs
+  // differently (ArraySolverDefault buckets reads by the candidate model
+  // value of the index, AextArraySolver sweeps all registered selects).
+  // Both drive the shared ArraySolver::checkPair for the per-pair test.
   d_internal->computeCareGraph(
       [this](TNode t1, TNode t2) { addCarePair(t1, t2); });
 }
