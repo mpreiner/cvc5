@@ -175,8 +175,34 @@ class AextArraySolver : public ArraySolver
    * branch where no emitted lemma covers it -- an unsound "sat".
    */
   context::CDHashMap<Node, uint32_t> d_witnessRepPairCount;
-  /** Lemma deduplication cache (context-dependent) */
-  NodeSet d_lemmaCache;
+  /**
+   * Lemma deduplication caches (context-dependent). There is one cache per
+   * lemma kind: the conclusions of different kinds are not syntactically
+   * disjoint, so a single shared cache aliases across kinds. In particular an
+   * index split (= i j) where i and j are themselves SELECT terms is
+   * indistinguishable from a CongR conclusion, and if the split were cached
+   * first then CongR for that read pair would be silently suppressed while
+   * checkAccess still stops propagating the read, leaving the read equality
+   * unenforced.
+   *
+   * The CongR cache is keyed on the full lemma (exp => conc), not on conc
+   * alone. One conclusion has one guard set per pair of propagation paths, and
+   * keying on the conclusion emits only whichever pair was found first. CongR
+   * emits a lemma and nothing else, so the conclusion is not made true in the
+   * current context: the SAT solver may satisfy that clause by falsifying a
+   * literal of the guard -- possibly by unit propagation at the current level,
+   * without any backtracking that would clear this cache -- while a second
+   * store path still connects the two reads. The next check() re-detects the
+   * conflict, hits the cache, emits nothing, and reports a spurious sat.
+   * (Keying on the lemma cannot be delegated to
+   * TheoryInferenceManager::d_lemmasSent: the arrays inference manager is
+   * constructed with cacheLemmas=false.)
+   */
+  NodeSet d_congruenceLemmaCache;
+  /** Deduplication cache for RIntro2 lemmas, keyed on the conclusion. */
+  NodeSet d_rintro2LemmaCache;
+  /** Deduplication cache for index split lemmas, keyed on the split. */
+  NodeSet d_indexSplitCache;
 
   //--------------------------------- per-check data structures
   std::vector<std::pair<TNode, TNode>> d_pendingCarePairs;
