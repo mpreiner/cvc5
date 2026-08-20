@@ -116,11 +116,6 @@ class TheoryArrays : public Theory
   /////////////////////////////////////////////////////////////////////////////
 
  private:
-  /** Literals to propagate */
-  context::CDList<Node> d_literalsToPropagate;
-  /** Index of the next literal to propagate */
-  context::CDO<unsigned> d_literalsToPropagateIndex;
-
   /** Should be called to propagate the literal. */
   bool propagateLit(TNode literal);
 
@@ -248,8 +243,6 @@ class TheoryArrays : public Theory
   context::CDO<bool> d_sharedTerms;
 
   context::CDList<Node> d_modelConstraints;
-  context::CDHashSet<Node> d_lemmasSaved;
-  std::vector<Node> d_lemmas;
 
   // Default values for each mayEqual equivalence class
   DefValMap d_defValues;
