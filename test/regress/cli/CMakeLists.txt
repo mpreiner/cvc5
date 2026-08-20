@@ -116,6 +116,8 @@ set(regress_0_tests
   regress0/arrays/aext-proof-congr.smt2
   regress0/arrays/aext-proof-const-array.smt2
   regress0/arrays/aext-proof-rintro2.smt2
+  regress0/arrays/aext-rowu-closure.smt2
+  regress0/arrays/aext-rowu-required.smt2
   regress0/arrays/arrays0.smt2
   regress0/arrays/arrays1.smt2
   regress0/arrays/arrays2.smt2

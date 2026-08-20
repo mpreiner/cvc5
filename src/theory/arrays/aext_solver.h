@@ -220,6 +220,60 @@ class AextArraySolver : public ArraySolver
   std::unordered_map<TNode, std::unordered_map<TNode, PropagatedRead>>
       d_arrayModels;
   std::unordered_map<TNode, std::vector<TNode>> d_parentStores;
+  /**
+   * Representatives from which RowU (upward propagation into parent stores) is
+   * allowed. Built by computeActiveArrays: the representative of every STORE
+   * term whose equivalence class has more than one member, closed downwards
+   * through store bases.
+   *
+   * WHY GATING HERE IS SOUND. Suppressing upward propagation is where a wrong
+   * "sat" would come from, so the argument is spelled out.
+   *
+   * First, what exclusion means. If rep(a) is absent from this set then every
+   * parent store s of rep(a) -- every s in d_stores with rep(s[0]) == rep(a) --
+   * is alone in its class. Contrapositive: if some parent store s had
+   * |class(rep(s))| > 1 then rep(s) would be in the seed, and processing it in
+   * the downward closure would find s (a STORE) in its own class and insert
+   * rep(s[0]) == rep(a).
+   *
+   * Now take a read r = select(x, i) with rep(x) == rep(a), and a parent store
+   * s = store(b, j, v) with rep(b) == rep(a). Step 4 of checkAccess would only
+   * push s when rep(i) != rep(j). RowU exists to let r meet other terms at
+   * class(rep(s)); with that class a singleton {s}, each possibility is
+   * covered without it:
+   *
+   *  1. CongR. Any read at class(rep(s)) is a select whose array lies in
+   *     {s}, so it is syntactically select(s, i') -- including the virtual
+   *     InitW read select(s, j). CongR against r needs rep(i') == rep(i),
+   *     which differs from rep(j); so RowD at class(rep(s)) pushes s[0], and
+   *     select(s, i') descends into class(rep(b)) == rep(a), where r is
+   *     already recorded. The same pair is compared, one level lower.
+   *  2. AccessStore. The only STORE in class(rep(s)) is s, and firing would
+   *     need rep(i) == rep(s[1]) == rep(j), which contradicts the condition
+   *     under which Step 4 propagates at all.
+   *  3. AccessConstArray. class(rep(s)) holds no STORE_ALL: it holds only s,
+   *     which is a STORE.
+   *  4. Stores above s. If any ancestor store's class is non-trivial, the
+   *     downward closure marks every store base beneath it, rep(a) included,
+   *     so the gate would not have blocked. If every ancestor is a singleton
+   *     too, cases 1-3 apply at each level and the descent in case 1 carries
+   *     the partner read all the way down to rep(a).
+   *
+   * Note findPathConditions deliberately does NOT apply this gate to its BFS.
+   * That asymmetry is safe in this direction only: the BFS just has to find
+   * some valid RowD/RowU path justifying a conflict that forward propagation
+   * already found, and RowU is sound with or without the gate. Gating there
+   * could only make the search fail to find a path, never make it return an
+   * invalid one.
+   *
+   * HISTORY. 7288daf85d replaced this with a gate on read-presence at the
+   * parent and mirrored it into findPathConditions; e52a6d4934 reverted it.
+   * That gate is not implied by the structure above -- absence of a read at
+   * the parent right now says nothing about case 1's descent -- and it broke
+   * ext27.btor.smt2, whose only reads are the virtual InitW ones. Counting
+   * those reads instead made the gate vacuous. Prefer this structural
+   * condition over any read-presence test.
+   */
   std::unordered_set<TNode> d_activeArrays;
   //--------------------------------- end per-check data structures
 

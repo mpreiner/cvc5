@@ -291,6 +291,13 @@ void AextArraySolver::buildParentMap()
   }
 }
 
+/**
+ * Compute the representatives from which RowU is allowed (see the invariant
+ * documented on d_activeArrays in the header).
+ *
+ * The set is: every representative of a STORE term whose equivalence class has
+ * more than one member, closed downwards through store bases.
+ */
 void AextArraySolver::computeActiveArrays()
 {
   d_activeArrays.clear();
