@@ -64,8 +64,6 @@ TheoryArrays::TheoryArrays(Env& env,
       d_rewriter(env.getNodeManager(), env.getRewriter()),
       d_state(env, valuation),
       d_im(env, *this, d_state),
-      d_literalsToPropagate(context()),
-      d_literalsToPropagateIndex(context(), 0),
       d_isPreRegistered(context()),
       d_mayEqualEqualityEngine(env, context(), name + "mayEqual", true),
       d_notify(*this),
@@ -74,7 +72,6 @@ TheoryArrays::TheoryArrays(Env& env,
       d_sharedOther(context()),
       d_sharedTerms(context(), false),
       d_modelConstraints(context()),
-      d_lemmasSaved(context()),
       d_defValues(context())
 {
   d_true = nodeManager()->mkConst<bool>(true);
@@ -773,6 +770,7 @@ void TheoryArrays::computeRelevantTerms(std::set<Node>& termSet)
     Node eqc = (*eqcs_i);
     if (!eqc.getType().isArray())
     {
+      // not an array, skip
       continue;
     }
     eq::EqClassIterator eqc_i = eq::EqClassIterator(eqc, d_equalityEngine);
@@ -783,6 +781,7 @@ void TheoryArrays::computeRelevantTerms(std::set<Node>& termSet)
       {
         if (n.getKind() == Kind::STORE)
         {
+          // Make sure RIntro1 reads are included
           Node r = nm->mkNode(Kind::SELECT, n, n[1]);
           Trace("arrays::collectModelInfo")
               << "TheoryArrays::collectModelInfo, adding RIntro1 read: " << r

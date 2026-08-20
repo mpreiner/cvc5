@@ -124,11 +124,20 @@ class AextArraySolver : public ArraySolver
    * Find a path from a select's starting array to a target array
    * representative through the store graph (RowD/RowU edges), and
    * extract the path conditions.
+   *
+   * @param linkEntryToTargetRep whether to emit the guard tying the array the
+   * path arrives at to targetRep. Callers that go on to add a stronger link
+   * for that same array -- AccessStore and AccessConstArray, which add
+   * `entryArray = store` -- should pass false: the rep equality is then
+   * redundant, unused by the proof reconstruction, and only weakens the
+   * lemma. CongR must pass true, because convertCongruence bridges its two
+   * path endpoints through exactly these array equalities.
    */
   TNode findPathConditions(TNode select,
                            TNode targetRep,
                            std::vector<Node>& conds,
-                           std::vector<PathEdge>* edges = nullptr);
+                           std::vector<PathEdge>* edges = nullptr,
+                           bool linkEntryToTargetRep = true);
   /**
    * RIntro2 theory propagation.
    */

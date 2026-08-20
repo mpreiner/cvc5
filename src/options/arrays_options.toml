@@ -14,7 +14,7 @@ name   = "Arrays Theory"
   help = "use the default (legacy) array solver"
 [[option.mode.AEXT]]
   name = "aext"
-  help = "use the AEXT calculus-based array solver (Brummayer/Biere)"
+  help = "use the AEXT calculus-based array solver (Brummayer/Biere); note this solver ignores the other arrays options (--arrays-weak-equiv, --arrays-eager-lemmas, --arrays-eager-index, --arrays-prop, --arrays-optimize-linear), which only affect the default solver"
 
 [[option]]
   name       = "arraysOptimizeLinear"

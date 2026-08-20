@@ -178,7 +178,9 @@ void AextArraySolver::mergeArraysModelOnly(TNode a, TNode b)
 // NOTIFICATIONS
 /////////////////////////////////////////////////////////////////////////////
 
-void AextArraySolver::notifyArrayDisequality(TNode a, TNode /*b*/, TNode reason)
+void AextArraySolver::notifyArrayDisequality(CVC5_UNUSED TNode a,
+                                             TNode /*b*/,
+                                             TNode reason)
 {
   Assert(a.getType().isArray());
   d_arrayDisequalities.push_back(reason);
@@ -425,8 +427,10 @@ void AextArraySolver::checkAccess(TNode select)
               Node conc = select.eqNode(n[2]);
               std::vector<Node> expVec;
               std::vector<std::vector<PathEdge>> paths(1);
-              TNode entryArray =
-                  findPathConditions(select, arrayRep, expVec, &paths[0]);
+              // The caller-added `entryArray = n` below is strictly stronger
+              // than `entryArray = arrayRep`, so skip the latter.
+              TNode entryArray = findPathConditions(
+                  select, arrayRep, expVec, &paths[0], false);
               if (index != n[1])
               {
                 expVec.push_back(index.eqNode(n[1]));
@@ -468,8 +472,10 @@ void AextArraySolver::checkAccess(TNode select)
             Node conc = select.eqNode(defValue);
             std::vector<Node> expVec;
             std::vector<std::vector<PathEdge>> paths(1);
-            TNode entryArray =
-                findPathConditions(select, arrayRep, expVec, &paths[0]);
+            // As in AccessStore: `entryArray = n` below subsumes the rep
+            // equality, so do not emit it.
+            TNode entryArray = findPathConditions(
+                select, arrayRep, expVec, &paths[0], false);
             if (entryArray != n)
             {
               expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
@@ -549,7 +555,8 @@ void AextArraySolver::checkAccess(TNode select)
 TNode AextArraySolver::findPathConditions(TNode select,
                                           TNode targetRep,
                                           std::vector<Node>& conds,
-                                          std::vector<PathEdge>* pathEdges)
+                                          std::vector<PathEdge>* pathEdges,
+                                          bool linkEntryToTargetRep)
 {
   TNode index = select[1];
   TNode indexRep = d_ee->getRepresentative(index);
@@ -560,7 +567,7 @@ TNode AextArraySolver::findPathConditions(TNode select,
   if (startRep == targetRep)
   {
     Node entryEq;
-    if (startArray != startRep)
+    if (startArray != startRep && linkEntryToTargetRep)
     {
       entryEq = startArray.eqNode(static_cast<Node>(startRep));
       conds.push_back(entryEq);
@@ -667,7 +674,7 @@ TNode AextArraySolver::findPathConditions(TNode select,
     if (be.store.isNull())
     {
       Node entryEq;
-      if (be.entryArray != cur)
+      if (be.entryArray != cur && (cur != targetRep || linkEntryToTargetRep))
       {
         entryEq = be.entryArray.eqNode(static_cast<Node>(cur));
         conds.push_back(entryEq);
@@ -680,7 +687,7 @@ TNode AextArraySolver::findPathConditions(TNode select,
     }
 
     Node entryEq;
-    if (be.entryArray != cur)
+    if (be.entryArray != cur && (cur != targetRep || linkEntryToTargetRep))
     {
       entryEq = be.entryArray.eqNode(static_cast<Node>(cur));
       conds.push_back(entryEq);

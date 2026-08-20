@@ -532,6 +532,9 @@ void ArraySolverDefault::mergeArrays(TNode a, TNode b)
   Node n;
   while (true)
   {
+    // Normally, a is its own representative, but it's possible for a to have
+    // been merged with another array after it got queued up by the equality
+    // engine, so we take its representative to be safe.
     a = d_ee->getRepresentative(a);
     Assert(d_ee->getRepresentative(b) == a);
     Trace("arrays-merge") << spaces(context()->getLevel()) << "Arrays::merge: ("
@@ -543,6 +546,7 @@ void ArraySolverDefault::mergeArrays(TNode a, TNode b)
       bool bNL = d_infoMap.isNonLinear(b);
       if (aNL)
       {
+        // If both are already marked non-linear there is nothing to do.
         if (!bNL)
         {
           setNonLinear(b);
@@ -556,6 +560,7 @@ void ArraySolverDefault::mergeArrays(TNode a, TNode b)
         }
         else
         {
+          // Check for new non-linear arrays.
           const CTNodeList* astores = d_infoMap.getStores(a);
           const CTNodeList* bstores = d_infoMap.getStores(b);
           Assert(astores->size() <= 1 && bstores->size() <= 1);
@@ -588,6 +593,10 @@ void ArraySolverDefault::mergeArrays(TNode a, TNode b)
     TNode mayRepA = d_mayEqualEqualityEngine.getRepresentative(a);
     TNode mayRepB = d_mayEqualEqualityEngine.getRepresentative(b);
 
+    // If a and b have different default values associated with their mayequal
+    // equivalence classes, things get complicated.  Similarly, if two mayequal
+    // equivalence classes have different constant representatives, it's not
+    // clear what to do. - disallow these cases for now.  -Clark
     DefValMap::iterator it = d_defValues.find(mayRepA);
     DefValMap::iterator it2 = d_defValues.find(mayRepB);
     TNode defValue;
@@ -911,7 +920,8 @@ void ArraySolverDefault::queueRowLemma(RowLemmaType lem)
   Node aj = nm->mkNode(Kind::SELECT, a, j);
   Node bj = nm->mkNode(Kind::SELECT, b, j);
 
-  // Try to avoid introducing new read terms
+  // Try to avoid introducing new read terms: track whether these already
+  // exist
   bool ajExists = d_ee->hasTerm(aj);
   bool bjExists = d_ee->hasTerm(bj);
   bool bothExist = ajExists && bjExists;
@@ -928,7 +938,7 @@ void ArraySolverDefault::queueRowLemma(RowLemmaType lem)
       && !d_ee->areDisequal(i, j, false))
   {
     Node i_eq_j;
-    i_eq_j = d_valuation.ensureLiteral(i.eqNode(j));
+    i_eq_j = d_valuation.ensureLiteral(i.eqNode(j));  // TODO: think about this
     d_out.preferPhase(i_eq_j, true);
     d_decisionRequests.push(i_eq_j);
   }
@@ -1252,11 +1262,14 @@ void ArraySolverDefault::weakEquivBuildCond(TNode node,
     index2 = d_infoMap.getWeakEquivIndex(node);
     if (index2.isNull())
     {
+      // Null index means these two nodes became equal: explain the equality.
       d_ee->explainEquality(node, pointer, true, conjunctions);
       node = pointer;
     }
     else if (!d_ee->areEqual(index, index2))
     {
+      // If indices are not equal in current context, need to add that to the
+      // lemma.
       Node reason = index.eqNode(index2).notNode();
       d_permRef.push_back(reason);
       conjunctions.push_back(reason);
@@ -1547,6 +1560,12 @@ void ArraySolverDefault::computeCareGraph(AddCarePairFn addCarePair)
   }
 
   // Go through the read terms and see if there are any to split on
+
+  // Give constReadsContext a push so that all the work it does here is erased
+  // - models can change if context changes at all.
+  // The context is popped at the end.  If this loop is interrupted for some
+  // reason, we have to make sure the context still gets popped or the solver
+  // will be in an inconsistent state.
   d_constReadsContext->push();
   unsigned size = d_reads.size();
   for (unsigned i = 0; i < size; ++i)
@@ -1569,6 +1588,10 @@ void ArraySolverDefault::computeCareGraph(AddCarePairFn addCarePair)
     }
     Node x_shared = d_ee->getTriggerTermRepresentative(x, THEORY_ARRAYS);
 
+    // Get the model value of index and find all reads that read from that same
+    // model value: these are the pairs we have to check.  Also, insert this
+    // read in the list at the proper index.
+
     if (!x_shared.isConst())
     {
       x_shared = d_valuation.getCandidateModelValue(x_shared);
@@ -1579,6 +1602,8 @@ void ArraySolverDefault::computeCareGraph(AddCarePairFn addCarePair)
       CNodeNListMap::iterator it = d_constReads.find(x_shared);
       if (it == d_constReads.end())
       {
+        // This is the only x_shared with this model value - no need to create
+        // any splits
         temp = new (true) CTNodeList(d_constReadsContext);
         d_constReads[x_shared] = temp;
       }
@@ -1594,7 +1619,11 @@ void ArraySolverDefault::computeCareGraph(AddCarePairFn addCarePair)
     }
     else
     {
-      // We don't know the model value for x. Brute force all pairs.
+      // We don't know the model value for x.  Just do brute force examination
+      // of all pairs of reads.  Note that we have to loop over *all* reads
+      // here, not just subsequent reads, because there may be an earlier read
+      // that *does* have a model value.  So if we don't check here, the two
+      // reads won't get compared.
       for (unsigned j = 0; j < size; ++j)
       {
         TNode r2 = d_reads[j];
@@ -1621,6 +1650,7 @@ void ArraySolverDefault::presolve()
   if (!d_dstratInit)
   {
     d_dstratInit = true;
+    // add the decision strategy, which is user-context-independent
     d_im.getDecisionManager()->registerStrategy(
         DecisionManager::STRAT_ARRAYS,
         d_dstrat.get(),
