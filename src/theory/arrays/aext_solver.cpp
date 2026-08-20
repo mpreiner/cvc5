@@ -559,13 +559,15 @@ TNode AextArraySolver::findPathConditions(TNode select,
   // Trivial case: already at target.
   if (startRep == targetRep)
   {
+    Node entryEq;
     if (startArray != startRep)
     {
-      conds.push_back(startArray.eqNode(static_cast<Node>(startRep)));
+      entryEq = startArray.eqNode(static_cast<Node>(startRep));
+      conds.push_back(entryEq);
     }
     if (pathEdges)
     {
-      pathEdges->push_back({TNode(), false});
+      pathEdges->push_back({TNode(), false, entryEq, Node(), Node()});
     }
     return startArray;
   }
@@ -659,47 +661,58 @@ TNode AextArraySolver::findPathConditions(TNode select,
     Assert(it != bfsEdges.end());
     const BFSEdge& be = it->second;
 
+    // Each literal pushed below is also recorded on the edge, so the proof
+    // converter can recover this edge's conditions without scanning the
+    // flattened explanation by position.
     if (be.store.isNull())
     {
+      Node entryEq;
       if (be.entryArray != cur)
       {
-        conds.push_back(be.entryArray.eqNode(static_cast<Node>(cur)));
+        entryEq = be.entryArray.eqNode(static_cast<Node>(cur));
+        conds.push_back(entryEq);
       }
       if (pathEdges)
       {
-        pathEdges->push_back({TNode(), false});
+        pathEdges->push_back({TNode(), false, entryEq, Node(), Node()});
       }
       break;
     }
 
+    Node entryEq;
     if (be.entryArray != cur)
     {
-      conds.push_back(be.entryArray.eqNode(static_cast<Node>(cur)));
+      entryEq = be.entryArray.eqNode(static_cast<Node>(cur));
+      conds.push_back(entryEq);
     }
 
     auto pit = bfsEdges.find(be.fromRep);
     Assert(pit != bfsEdges.end());
     TNode prevEntry = pit->second.entryArray;
 
+    Node linkEq;
     if (be.isRowU)
     {
       if (prevEntry != be.store[0])
       {
-        conds.push_back(prevEntry.eqNode(be.store[0]));
+        linkEq = prevEntry.eqNode(be.store[0]);
+        conds.push_back(linkEq);
       }
     }
     else
     {
       if (prevEntry != be.store)
       {
-        conds.push_back(prevEntry.eqNode(static_cast<Node>(be.store)));
+        linkEq = prevEntry.eqNode(static_cast<Node>(be.store));
+        conds.push_back(linkEq);
       }
     }
-    conds.push_back(index.eqNode(be.store[1]).notNode());
+    Node indexDiseq = index.eqNode(be.store[1]).notNode();
+    conds.push_back(indexDiseq);
 
     if (pathEdges)
     {
-      pathEdges->push_back({be.store, be.isRowU});
+      pathEdges->push_back({be.store, be.isRowU, entryEq, linkEq, indexDiseq});
     }
 
     cur = be.fromRep;
