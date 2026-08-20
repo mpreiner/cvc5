@@ -94,18 +94,38 @@ class ArraysInferProofCons : protected EnvObj, public ProofGenerator
    * edges (in target-to-start order), builds the chain of CONG + ROW
    * steps and returns the final select node reached.
    *
+   * The per-edge conditions are read off the PathEdge entries themselves,
+   * not scanned out of the explanation. expIdx is advanced by exactly the
+   * number of literals these edges contributed, so the caller knows where
+   * its own trailing conditions begin.
+   *
    * @param cdp the proof to add steps to
    * @param sel the select term being traced (select(readArray, readIndex))
    * @param pathEdges the store edges in target-to-start order
-   * @param expv the flattened explanation literals
-   * @param expIdx[in,out] current position in expv
+   * @param expIdx[in,out] current position in the flattened explanation
    * @return the select node at the end of the path
    */
   Node addPathSelectProof(CDProof* cdp,
                           Node sel,
                           const std::vector<PathEdge>& pathEdges,
-                          const std::vector<Node>& expv,
                           size_t& expIdx);
+
+  /**
+   * Add a CONG step proving `expected` from `premises` applied to `src`.
+   *
+   * expr::proveCong adds no step at all when its internal check fails, and
+   * can return an equality other than the one the surrounding chain is built
+   * around. In either case `expected` would remain an unproven leaf and hit
+   * Unreachable() inside ProofNodeManager::mkScope -- an abort that
+   * production builds reach too, since it is not behind an assertion. This
+   * closes that hole with a trusted step over the supplied premises.
+   *
+   * @return `expected`, which is guaranteed to have a proof afterwards.
+   */
+  Node addCongStep(CDProof* cdp,
+                   const Node& src,
+                   const std::vector<Node>& premises,
+                   const Node& expected);
 
   /** Proof conversion for CongR inferences. */
   void convertCongruence(const InferInfo& ii, TNode conc,
