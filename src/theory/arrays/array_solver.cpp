@@ -63,7 +63,7 @@ void ArraySolver::checkPair(TNode r1, TNode r2, AddCarePairFn& addCarePair)
   {
     Assert(d_mayEqualEqualityEngine.hasTerm(r1[0])
            && d_mayEqualEqualityEngine.hasTerm(r2[0]));
-    if (r1[0].getType() != r2[0].getType()
+    if (!CVC5_EQUAL(r1[0].getType(), r2[0].getType())
         || d_ee->areDisequal(r1[0], r2[0], false))
     {
       Trace("arrays::sharing")

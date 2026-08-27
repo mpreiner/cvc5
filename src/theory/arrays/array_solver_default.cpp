@@ -518,6 +518,12 @@ void ArraySolverDefault::mergeArrays(TNode a, TNode b)
   // Note: a is the new representative
   Assert(a.getType().isArray() && b.getType().isArray());
 
+  // Preregistration skips array bookkeeping once this theory is in conflict.
+  if (d_state.isInConflict())
+  {
+    return;
+  }
+
   if (d_mergeInProgress)
   {
     // Nested call to mergeArrays, just push on the queue and return
@@ -1024,9 +1030,11 @@ void ArraySolverDefault::queueRowLemma(RowLemmaType lem)
     Trace("arrays-lem") << "Arrays::addRowLemma (1) adding " << lemma << "\n";
     d_RowAlreadyAdded.insert(lem);
     // use non-rewritten nodes
+    // Use notEq2 to ensure deterministic node ID assignments
+    Node notEq2 = eq2.notNode();
     d_im.arrayLemma(aj.eqNode(bj),
                     InferenceId::ARRAYS_READ_OVER_WRITE,
-                    eq2.notNode(),
+                    notEq2,
                     ProofRule::ARRAYS_READ_OVER_WRITE);
     ++d_numRow;
   }
@@ -1168,9 +1176,11 @@ bool ArraySolverDefault::dischargeLemmas()
     Trace("arrays-lem") << "Arrays::addRowLemma (2) adding " << lem << "\n";
     d_RowAlreadyAdded.insert(l);
     // use non-rewritten nodes, theory preprocessing will rewrite
+    // Use notEq2 to ensure deterministic node ID assignments
+    Node notEq2 = eq2.notNode();
     d_im.arrayLemma(aj.eqNode(bj),
                     InferenceId::ARRAYS_READ_OVER_WRITE,
-                    eq2.notNode(),
+                    notEq2,
                     ProofRule::ARRAYS_READ_OVER_WRITE);
     ++d_numRow;
     lemmasAdded = true;
