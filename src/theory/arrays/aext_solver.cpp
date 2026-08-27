@@ -34,7 +34,7 @@ AextArraySolver::AextArraySolver(Env& env,
                                  DefValMap& defValues,
                                  context::CDO<bool>& sharedTerms)
     : ArraySolver(
-        env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
+          env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
       d_selects(context()),
       d_stores(context()),
       d_arrayDisequalities(context()),
@@ -101,10 +101,10 @@ void AextArraySolver::preRegisterStore(TNode node)
   // RIntro1: select(store(a, i, v), i) = v
   Node eq = ni.eqNode(node[2]);
   d_im.assertInference(eq,
-                        true,
-                        InferenceId::ARRAYS_READ_OVER_WRITE_1,
-                        nm->mkConst<bool>(true),
-                        ProofRule::ARRAYS_READ_OVER_WRITE_1);
+                       true,
+                       InferenceId::ARRAYS_READ_OVER_WRITE_1,
+                       nm->mkConst<bool>(true),
+                       ProofRule::ARRAYS_READ_OVER_WRITE_1);
 }
 
 void AextArraySolver::preRegisterStoreAll(TNode /*node*/)
@@ -205,8 +205,8 @@ void AextArraySolver::check(Theory::Effort level)
 
   ++d_numCheckCalls;
   Trace("arrays::aext") << "AextArraySolver::check() with " << d_selects.size()
-                         << " selects and " << d_stores.size() << " stores"
-                         << std::endl;
+                        << " selects and " << d_stores.size() << " stores"
+                        << std::endl;
 
   // Clear per-check data structures. Everything here is rebuilt from
   // scratch below, and is only read during this check() and the
@@ -481,8 +481,8 @@ void AextArraySolver::checkAccess(TNode select)
             std::vector<std::vector<PathEdge>> paths(1);
             // As in AccessStore: `entryArray = n` below subsumes the rep
             // equality, so do not emit it.
-            TNode entryArray = findPathConditions(
-                select, arrayRep, expVec, &paths[0], false);
+            TNode entryArray =
+                findPathConditions(select, arrayRep, expVec, &paths[0], false);
             if (entryArray != n)
             {
               expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
@@ -879,7 +879,7 @@ void AextArraySolver::checkDisequalities()
 
     Node eq = ak.eqNode(bk);
     Trace("arrays::aext") << "DisEq lemma: " << fact << " => " << eq.notNode()
-                           << std::endl;
+                          << std::endl;
     d_im.arrayLemma(eq.notNode(),
                     InferenceId::ARRAYS_AEXT_DISEQUALITY,
                     fact,

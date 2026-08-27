@@ -31,12 +31,12 @@ InferenceManager::~InferenceManager() {}
 
 InferenceManager::InferenceManager(Env& env, Theory& t, TheoryState& state)
     : TheoryInferenceManager(env, t, state, "theory::arrays::", false),
-      d_lemmaPg(isProofEnabled() ? new EagerProofGenerator(
-                    env, userContext(), "ArrayLemmaProofGenerator")
-                                 : nullptr),
-      d_ipc(isProofEnabled()
-                ? new ArraysInferProofCons(env, context())
-                : nullptr)
+      d_lemmaPg(isProofEnabled()
+                    ? new EagerProofGenerator(
+                          env, userContext(), "ArrayLemmaProofGenerator")
+                    : nullptr),
+      d_ipc(isProofEnabled() ? new ArraysInferProofCons(env, context())
+                             : nullptr)
 {
 }
 
@@ -48,8 +48,7 @@ bool InferenceManager::isAextInference(InferenceId id)
     case InferenceId::ARRAYS_AEXT_ROW:
     case InferenceId::ARRAYS_AEXT_DISEQUALITY:
     case InferenceId::ARRAYS_AEXT_INDEX_SPLIT:
-    case InferenceId::ARRAYS_CONST_ARRAY_DEFAULT:
-      return true;
+    case InferenceId::ARRAYS_CONST_ARRAY_DEFAULT: return true;
     default: return false;
   }
 }
@@ -100,13 +99,12 @@ bool InferenceManager::arrayLemma(
   return arrayLemma(conc, id, exp, pfr, {}, p);
 }
 
-bool InferenceManager::arrayLemma(
-    Node conc,
-    InferenceId id,
-    Node exp,
-    ProofRule pfr,
-    std::vector<std::vector<PathEdge>>&& paths,
-    LemmaProperty p)
+bool InferenceManager::arrayLemma(Node conc,
+                                  InferenceId id,
+                                  Node exp,
+                                  ProofRule pfr,
+                                  std::vector<std::vector<PathEdge>>&& paths,
+                                  LemmaProperty p)
 {
   Trace("arrays-infer") << "TheoryArrays::arrayLemma: " << conc << " by " << exp
                         << "; " << id << std::endl;
@@ -151,8 +149,7 @@ bool InferenceManager::arrayLemma(
       // deduplicated or reordered the explanation literals).
       Node lem = pn->getResult();
       d_lemmaPg->setProofFor(lem, pn);
-      return trustedLemma(
-          TrustNode::mkTrustLemma(lem, d_lemmaPg.get()), id, p);
+      return trustedLemma(TrustNode::mkTrustLemma(lem, d_lemmaPg.get()), id, p);
     }
     // Default solver path: use convert().
     std::vector<Node> children;

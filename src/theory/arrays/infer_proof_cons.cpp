@@ -98,7 +98,7 @@ void ArraysInferProofCons::convert(const InferInfo& ii,
   InferenceId id = ii.d_id;
   TNode exp = ii.d_exp;
   Trace("arrays-ipc") << "convert: " << id << ": " << conc << " by " << exp
-                       << std::endl;
+                      << std::endl;
   // Flatten the explanation into individual literals.
   std::vector<Node> expv;
   if (!exp.isNull() && !exp.isConst())
@@ -174,13 +174,12 @@ void ArraysInferProofCons::convert(const InferInfo& ii,
 // ============================================================
 
 Node ArraysInferProofCons::addCongStep(CDProof* cdp,
-                                      const Node& src,
-                                      const std::vector<Node>& premises,
-                                      const Node& expected)
+                                       const Node& src,
+                                       const std::vector<Node>& premises,
+                                       const Node& expected)
 {
   Node eq = expr::proveCong(d_env, cdp, src, premises);
-  if (!eq.isNull()
-      && (eq == expected || CDProof::getSymmFact(eq) == expected))
+  if (!eq.isNull() && (eq == expected || CDProof::getSymmFact(eq) == expected))
   {
     // Proven outright, or up to symmetry, which CDProof links on its own.
     return expected;
@@ -295,8 +294,8 @@ Node ArraysInferProofCons::addPathSelectProof(
         // CONG to bridge curSel to selectOnStore.
         Node arrEq = curSel[0].eqNode(static_cast<Node>(store));
         std::vector<Node> premises = {arrEq, Node()};
-        transEqs.push_back(addCongStep(
-            cdp, curSel, premises, curSel.eqNode(selectOnStore)));
+        transEqs.push_back(
+            addCongStep(cdp, curSel, premises, curSel.eqNode(selectOnStore)));
       }
       transEqs.push_back(rowConc);
       curSel = selectOnChild;
@@ -309,8 +308,8 @@ Node ArraysInferProofCons::addPathSelectProof(
       {
         Node arrEq = curSel[0].eqNode(store[0]);
         std::vector<Node> premises = {arrEq, Node()};
-        transEqs.push_back(addCongStep(
-            cdp, curSel, premises, curSel.eqNode(selectOnChild)));
+        transEqs.push_back(
+            addCongStep(cdp, curSel, premises, curSel.eqNode(selectOnChild)));
       }
       // SYMM of ROW: select(store[0], i) = select(store, i)
       transEqs.push_back(selectOnChild.eqNode(selectOnStore));
@@ -343,7 +342,8 @@ void ArraysInferProofCons::convertCongruence(const InferInfo& ii,
 
   if (ii.d_paths.size() < 2)
   {
-    Trace("arrays-ipc") << "convertCongruence: no path info, TRUST" << std::endl;
+    Trace("arrays-ipc") << "convertCongruence: no path info, TRUST"
+                        << std::endl;
     cdp->addTrustedStep(conc, TrustId::THEORY_INFERENCE_ARRAYS, expv, {});
     return;
   }
@@ -479,8 +479,8 @@ void ArraysInferProofCons::convertCongruence(const InferInfo& ii,
         //
         // Just push all bridge equalities to midTransEqs.
         // CDProof + TRANS will chain them.
-        Trace("arrays-ipc") << "  bridge found, " << bridgeEqs.size()
-                             << " steps" << std::endl;
+        Trace("arrays-ipc")
+            << "  bridge found, " << bridgeEqs.size() << " steps" << std::endl;
         for (auto it = bridgeEqs.rbegin(); it != bridgeEqs.rend(); ++it)
         {
           Trace("arrays-ipc") << "  bridge eq: " << *it << std::endl;
@@ -490,10 +490,10 @@ void ArraysInferProofCons::convertCongruence(const InferInfo& ii,
       else
       {
         // No path found through equalities; fall back to TRUST.
-        Trace("arrays-ipc") << "convertCongruence: can't bridge arrays from "
-                            << endArr1 << " to " << endArr2
-                            << ", adjMap size=" << adjMap.size()
-                            << ", TRUST" << std::endl;
+        Trace("arrays-ipc")
+            << "convertCongruence: can't bridge arrays from " << endArr1
+            << " to " << endArr2 << ", adjMap size=" << adjMap.size()
+            << ", TRUST" << std::endl;
         cdp->addTrustedStep(conc, TrustId::THEORY_INFERENCE_ARRAYS, expv, {});
         return;
       }
@@ -502,17 +502,19 @@ void ArraysInferProofCons::convertCongruence(const InferInfo& ii,
       if (endIdx1 != endIdx2 && !idxEq.isNull())
       {
         Node selBridged = nm->mkNode(Kind::SELECT, endArr2, endIdx1);
-        Node eqToUse = (idxEq[0] == endIdx1) ? idxEq : idxEq[1].eqNode(idxEq[0]);
+        Node eqToUse =
+            (idxEq[0] == endIdx1) ? idxEq : idxEq[1].eqNode(idxEq[0]);
         std::vector<Node> premises = {Node(), eqToUse};
-        midTransEqs.push_back(addCongStep(
-            cdp, selBridged, premises, selBridged.eqNode(endSel2)));
+        midTransEqs.push_back(
+            addCongStep(cdp, selBridged, premises, selBridged.eqNode(endSel2)));
       }
     }
     else if (endIdx1 != endIdx2)
     {
       // Arrays match but indices differ.
       Node idxPrem = idxEq.isNull() ? endIdx1.eqNode(endIdx2) : idxEq;
-      Node eqToUse = (idxPrem[0] == endIdx1) ? idxPrem : idxPrem[1].eqNode(idxPrem[0]);
+      Node eqToUse =
+          (idxPrem[0] == endIdx1) ? idxPrem : idxPrem[1].eqNode(idxPrem[0]);
       std::vector<Node> premises = {Node(), eqToUse};
       midTransEqs.push_back(
           addCongStep(cdp, endSel1, premises, endSel1.eqNode(endSel2)));
@@ -522,7 +524,8 @@ void ArraysInferProofCons::convertCongruence(const InferInfo& ii,
   // Now chain everything: sel1 = endSel1 [= endSel2] = sel2
   // The path proofs already added sel1 = endSel1 and sel2 = endSel2.
   // We need: sel1 = sel2
-  // So: sel1 = endSel1, endSel1 = endSel2, endSel2 = sel2 (SYMM of sel2 = endSel2)
+  // So: sel1 = endSel1, endSel1 = endSel2, endSel2 = sel2 (SYMM of sel2 =
+  // endSel2)
   std::vector<Node> finalTransEqs;
 
   // sel1 = endSel1 (from path proof)
@@ -568,7 +571,8 @@ void ArraysInferProofCons::convertAccessStore(const InferInfo& ii,
 
   if (ii.d_paths.empty())
   {
-    Trace("arrays-ipc") << "convertAccessStore: no path info, TRUST" << std::endl;
+    Trace("arrays-ipc") << "convertAccessStore: no path info, TRUST"
+                        << std::endl;
     cdp->addTrustedStep(conc, TrustId::THEORY_INFERENCE_ARRAYS, expv, {});
     return;
   }
@@ -585,7 +589,8 @@ void ArraysInferProofCons::convertAccessStore(const InferInfo& ii,
       << "convertAccessStore: path conditions overrun the explanation";
 
   // endSel = select(entryArray, readIndex)
-  // Now consume remaining conditions: index equality and array equality to store.
+  // Now consume remaining conditions: index equality and array equality to
+  // store.
   Node readIndex = sel[1];
   Node endArray = endSel[0];
   Node store;
@@ -654,8 +659,10 @@ void ArraysInferProofCons::convertAccessStore(const InferInfo& ii,
   // endSel = select(store, readIndex) via CONG from arrayEq
   if (!arrayEq.isNull())
   {
-    Node selOnStore = nm->mkNode(Kind::SELECT, static_cast<Node>(store), readIndex);
-    Node eqToUse = (endArray == arrayEq[0]) ? arrayEq : arrayEq[1].eqNode(arrayEq[0]);
+    Node selOnStore =
+        nm->mkNode(Kind::SELECT, static_cast<Node>(store), readIndex);
+    Node eqToUse =
+        (endArray == arrayEq[0]) ? arrayEq : arrayEq[1].eqNode(arrayEq[0]);
     std::vector<Node> premises = {eqToUse, Node()};
     transEqs.push_back(
         addCongStep(cdp, endSel, premises, endSel.eqNode(selOnStore)));
@@ -749,7 +756,8 @@ void ArraysInferProofCons::convertAccessConstArray(
     Node endArray = endSel[0];
     constArr = (arrayEq[0] == endArray) ? arrayEq[1] : arrayEq[0];
     Node selOnConst = nm->mkNode(Kind::SELECT, constArr, readIndex);
-    Node eqToUse = (endArray == arrayEq[0]) ? arrayEq : arrayEq[1].eqNode(arrayEq[0]);
+    Node eqToUse =
+        (endArray == arrayEq[0]) ? arrayEq : arrayEq[1].eqNode(arrayEq[0]);
     std::vector<Node> premises = {eqToUse, Node()};
     transEqs.push_back(
         addCongStep(cdp, endSel, premises, endSel.eqNode(selOnConst)));
@@ -790,10 +798,10 @@ void ArraysInferProofCons::convertRIntro2(TNode conc,
 
   // Parse the explanation.
   Node store;
-  Node arrEqN;   // X = store
-  Node arrEqC;   // Y = store[0]
-  Node idxEq;    // j' = j
-  Node idxDiseq; // NOT(= j k)
+  Node arrEqN;    // X = store
+  Node arrEqC;    // Y = store[0]
+  Node idxEq;     // j' = j
+  Node idxDiseq;  // NOT(= j k)
 
   for (const Node& lit : expv)
   {
@@ -815,8 +823,8 @@ void ArraysInferProofCons::convertRIntro2(TNode conc,
       {
         arrEqC = lit;
       }
-      else if (lit[0] == rC[1] || lit[1] == rC[1]
-               || lit[0] == rN[1] || lit[1] == rN[1])
+      else if (lit[0] == rC[1] || lit[1] == rC[1] || lit[0] == rN[1]
+               || lit[1] == rN[1])
       {
         idxEq = lit;
       }
@@ -853,11 +861,9 @@ void ArraysInferProofCons::convertRIntro2(TNode conc,
   if (rN != selOnStore)
   {
     Assert(!arrEqN.isNull());
-    Node eqToUse =
-        (arrEqN[0] == rN[0]) ? arrEqN : arrEqN[1].eqNode(arrEqN[0]);
+    Node eqToUse = (arrEqN[0] == rN[0]) ? arrEqN : arrEqN[1].eqNode(arrEqN[0]);
     std::vector<Node> premises = {eqToUse, Node()};
-    transEqs.push_back(
-        addCongStep(cdp, rN, premises, rN.eqNode(selOnStore)));
+    transEqs.push_back(addCongStep(cdp, rN, premises, rN.eqNode(selOnStore)));
   }
 
   // Step 2: ROW: select(store, j) = select(store[0], j)

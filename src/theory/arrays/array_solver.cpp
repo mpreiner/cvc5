@@ -121,8 +121,8 @@ void ArraySolver::checkPair(TNode r1, TNode r2, AddCarePairFn& addCarePair)
   }
 
   // Add this pair
-  Trace("arrays::sharing")
-      << "arrays::computeCareGraph(): adding to care-graph" << std::endl;
+  Trace("arrays::sharing") << "arrays::computeCareGraph(): adding to care-graph"
+                           << std::endl;
   addCarePair(x_shared, y_shared);
 }
 

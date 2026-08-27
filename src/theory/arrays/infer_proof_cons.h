@@ -128,17 +128,22 @@ class ArraysInferProofCons : protected EnvObj, public ProofGenerator
                    const Node& expected);
 
   /** Proof conversion for CongR inferences. */
-  void convertCongruence(const InferInfo& ii, TNode conc,
-                         const std::vector<Node>& expv, CDProof* cdp);
+  void convertCongruence(const InferInfo& ii,
+                         TNode conc,
+                         const std::vector<Node>& expv,
+                         CDProof* cdp);
   /** Proof conversion for AccessStore inferences. */
-  void convertAccessStore(const InferInfo& ii, TNode conc,
-                          const std::vector<Node>& expv, CDProof* cdp);
+  void convertAccessStore(const InferInfo& ii,
+                          TNode conc,
+                          const std::vector<Node>& expv,
+                          CDProof* cdp);
   /** Proof conversion for AccessConstArray inferences. */
-  void convertAccessConstArray(const InferInfo& ii, TNode conc,
-                               const std::vector<Node>& expv, CDProof* cdp);
+  void convertAccessConstArray(const InferInfo& ii,
+                               TNode conc,
+                               const std::vector<Node>& expv,
+                               CDProof* cdp);
   /** Proof conversion for RIntro2 inferences. */
-  void convertRIntro2(TNode conc, const std::vector<Node>& expv,
-                      CDProof* cdp);
+  void convertRIntro2(TNode conc, const std::vector<Node>& expv, CDProof* cdp);
 
   /** A dummy context used if none is provided. */
   context::Context d_context;

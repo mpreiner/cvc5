@@ -46,7 +46,7 @@ ArraySolverDefault::ArraySolverDefault(Env& env,
                                        OutputChannel& out,
                                        PreRegCallback preRegCb)
     : ArraySolver(
-        env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
+          env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
       d_out(out),
       d_preRegCb(preRegCb),
       d_numRow(statisticsRegistry().registerInt(
