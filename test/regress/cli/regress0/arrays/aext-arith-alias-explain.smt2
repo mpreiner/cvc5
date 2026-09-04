@@ -1,0 +1,85 @@
+; COMMAND-LINE: --arrays-solver=aext
+; EXPECT: sat
+; Reduced from QF_ANIA/20211213-GrandProduct-Ozdemir/unsound/diff/5.smt2.
+;
+; Two atoms here normalize to the same arithmetic constraint: the index split
+; (= v__i w__j) that the AEXT solver emits, and the shared-term equality over
+; the offset index terms that theory combination introduces. Only the first one
+; set up becomes the constraint's literal (Constraint::setLiteral), and
+; Constraint::externalExplain reports the constraint by that literal whenever
+; it has an equality engine proof, expecting the congruence manager to explain
+; it afterwards. If the congruence manager never registered the literal,
+; TheoryArith explains it trivially by itself and TheoryEngine::getExplanation
+; keeps re-expanding it -- an unbounded loop that exhausted memory here.
+(set-logic QF_ANIA)
+(declare-fun b__1 () Int)
+(declare-fun b__0 () Int)
+(declare-fun w__0 () Int)
+(declare-fun v__0 () Int)
+(declare-fun w__1 () Int)
+(declare-fun v__1 () Int)
+(declare-fun w__2 () Int)
+(declare-fun v__2 () Int)
+(declare-fun w__3 () Int)
+(declare-fun v__3 () Int)
+(declare-fun w__4 () Int)
+(declare-fun v__4 () Int)
+(declare-fun start () (Array Int Int))
+(assert
+ (let ((?x143 (* b__0 1)))
+ (let ((?x357 (+ v__4 ?x143)))
+ (let ((?x100 (* b__0 5)))
+ (let ((?x48 (+ v__3 ?x100)))
+ (let ((?x381 (* b__0 4)))
+ (let ((?x382 (+ v__2 ?x381)))
+ (let ((?x370 (* b__0 3)))
+ (let ((?x371 (+ v__1 ?x370)))
+ (let ((?x85 (* b__0 2)))
+ (let ((?x47 (+ v__0 ?x85)))
+ (let ((?x49 (store start ?x47 (+ (select start ?x47) 1))))
+ (let ((?x379 (store ?x49 ?x371 (+ (select ?x49 ?x371) 1))))
+ (let ((?x261 (store ?x379 ?x382 (+ (select ?x379 ?x382) 1))))
+ (let ((?x362 (store ?x261 ?x48 (+ (select ?x261 ?x48) 1))))
+ (let ((?x369 (store ?x362 ?x357 (+ (select ?x362 ?x357) 1))))
+ (let ((?x363 (+ w__4 ?x100)))
+ (let ((?x221 (+ w__3 ?x381)))
+ (let ((?x368 (+ w__2 ?x370)))
+ (let ((?x156 (+ w__1 ?x85)))
+ (let ((?x98 (+ w__0 ?x143)))
+ (let ((?x138 (store start ?x98 (+ (select start ?x98) 1))))
+ (let ((?x361 (store ?x138 ?x156 (+ (select ?x138 ?x156) 1))))
+ (let ((?x376 (store ?x361 ?x368 (+ (select ?x361 ?x368) 1))))
+ (let ((?x272 (store ?x376 ?x221 (+ (select ?x376 ?x221) 1))))
+ (let ((?x356 (store ?x272 ?x363 (+ (select ?x272 ?x363) 1))))
+ (= ?x356 ?x369)))))))))))))))))))))))))))
+(assert
+ (let ((?x187 (* b__1 1)))
+ (let ((?x165 (+ v__4 ?x187)))
+ (let ((?x311 (* b__1 5)))
+ (let ((?x273 (+ v__3 ?x311)))
+ (let ((?x299 (* b__1 4)))
+ (let ((?x298 (+ v__2 ?x299)))
+ (let ((?x365 (* b__1 3)))
+ (let ((?x366 (+ v__1 ?x365)))
+ (let ((?x124 (* b__1 2)))
+ (let ((?x149 (+ v__0 ?x124)))
+ (let ((?x78 (store start ?x149 (+ (select start ?x149) 1))))
+ (let ((?x384 (store ?x78 ?x366 (+ (select ?x78 ?x366) 1))))
+ (let ((?x290 (store ?x384 ?x298 (+ (select ?x384 ?x298) 1))))
+ (let ((?x262 (store ?x290 ?x273 (+ (select ?x290 ?x273) 1))))
+ (let ((?x247 (store ?x262 ?x165 (+ (select ?x262 ?x165) 1))))
+ (let ((?x263 (+ w__4 ?x311)))
+ (let ((?x289 (+ w__3 ?x299)))
+ (let ((?x385 (+ w__2 ?x365)))
+ (let ((?x103 (+ w__1 ?x124)))
+ (let ((?x43 (+ w__0 ?x187)))
+ (let ((?x237 (store start ?x43 (+ (select start ?x43) 1))))
+ (let ((?x218 (store ?x237 ?x103 (+ (select ?x237 ?x103) 1))))
+ (let ((?x300 (store ?x218 ?x385 (+ (select ?x218 ?x385) 1))))
+ (let ((?x312 (store ?x300 ?x289 (+ (select ?x300 ?x289) 1))))
+ (let ((?x151 (store ?x312 ?x263 (+ (select ?x312 ?x263) 1))))
+ (= ?x151 ?x247)))))))))))))))))))))))))))
+(assert
+ (let (($x349 (and (= w__1 v__0) (= w__2 v__1) (= w__3 v__2) (= w__4 v__3) (= w__0 v__4))))
+ (not $x349)))
+(check-sat)

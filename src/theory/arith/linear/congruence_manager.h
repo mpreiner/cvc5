@@ -194,6 +194,11 @@ class ArithCongruenceManager : protected EnvObj
    * propagate but that are not the propagation itself, nor its rewritten form.
    */
   void pushBackAlias(TNode n);
+  /**
+   * Make sure the literal of c, which Constraint::externalExplain reports for
+   * constraints with an equality engine proof, can be explained by this class.
+   */
+  void ensureLiteralExplainable(ConstraintP c);
 
   /** Assert this literal to the eq engine. Common functionality for
    *   * assertionToEqualityEngine(..)

@@ -183,6 +183,28 @@ void ArithCongruenceManager::pushBackAlias(TNode n)
   d_explanationMap.insert(n, d_propagatations.size() - 1);
 }
 
+void ArithCongruenceManager::ensureLiteralExplainable(ConstraintP c)
+{
+  // Once c has an equality engine proof, Constraint::externalExplain reports c
+  // by its literal, expecting this class to explain that literal afterwards.
+  // The literal is the first atom that was set up for c (see
+  // Constraint::setLiteral) and need not be the atom we just pushed back:
+  // several atoms can normalize to the same constraint, e.g. (= x y) and
+  // (= (+ 1 x) (+ 1 y)), since the rewriter does not normalize equalities.
+  // Register the literal too, otherwise TheoryArith has nothing to expand it
+  // with and explains it trivially by itself, which
+  // TheoryEngine::getExplanation cannot make progress on.
+  if (!c->hasLiteral())
+  {
+    return;
+  }
+  Node lit = c->getLiteral();
+  if (!canExplain(lit))
+  {
+    pushBackAlias(lit);
+  }
+}
+
 void ArithCongruenceManager::watchedVariableIsZero(ConstraintCP lb,
                                                    ConstraintCP ub)
 {
@@ -650,16 +672,9 @@ bool ArithCongruenceManager::propagate(TNode x)
     }
 
     c->setEqualityEngineProof();
+    ensureLiteralExplainable(c);
     if (c->canBePropagated() && !c->assertedToTheTheory())
     {
-      // Note that the propagation of c below is stated in terms of its
-      // literal, which may be distinct from rewritten. This is the case when
-      // several atoms correspond to c, in which case the first one that was
-      // set up is its literal, see Constraint::setLiteral. We thus ensure that
-      // the literal of c can be explained by this class as well, since
-      // otherwise we would explain it (trivially) by itself below, see
-      // Constraint::externalExplain.
-      pushBackAlias(c->getLiteral());
       ++(d_statistics.d_propagateConstraints);
       c->propagate();
     }
@@ -675,6 +690,7 @@ bool ArithCongruenceManager::propagate(TNode x)
       pushBack(x);
     }
     c->setEqualityEngineProof();
+    ensureLiteralExplainable(c);
   }
   else if (c->hasProof() && x != rewritten)
   {
