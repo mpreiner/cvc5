@@ -2004,6 +2004,28 @@ TrustNode TheoryEngine::getExplanation(
     // It was produced by the theory, so ask for an explanation
     TrustNode texplanation =
         d_sharedSolver->explain(toExplain.d_node, toExplain.d_theory);
+    if (texplanation.getNode() == toExplain.d_node)
+    {
+      // The theory explained the literal by itself, i.e. it holds it as an
+      // assumption. This happens for literals a theory derived internally and
+      // marked self-explaining, which this class consequently has no record of
+      // in d_propagationMap. There is nothing left to expand, so keep the
+      // literal, exactly as we do for literals that came from the SAT solver.
+      //
+      // Pushing it back onto explanationVector instead does not terminate: the
+      // copy carries the same timestamp, so the cache test above (which skips
+      // only strictly older entries) does not filter it, and the same trivial
+      // explanation is re-derived until memory runs out.
+      Assert(false) << "wasn't sent to you, so why are you explaining it "
+                       "trivially, for fact "
+                    << toExplain.d_node;
+      Trace("theory::explain") << "\tTheory " << toExplain.d_theory
+                               << " explains it trivially. Keeping it." << endl;
+      exp.insert(explanationVector[i++].d_node);
+      // it will be a free assumption in the proof
+      Trace("te-proof-exp") << "- keep " << toExplain.d_node << std::endl;
+      continue;
+    }
     if (lcp != nullptr)
     {
       texplanation.debugCheckClosed(
@@ -2027,10 +2049,6 @@ TrustNode TheoryEngine::getExplanation(
     Trace("theory::explain")
         << "TheoryEngine::explain(): got explanation " << explanation
         << " got from " << toExplain.d_theory << endl;
-    Assert(explanation != toExplain.d_node)
-        << "wasn't sent to you, so why are you explaining it trivially, for "
-           "fact "
-        << explanation;
     // Mark the explanation
     NodeTheoryPair newExplain(
         explanation, toExplain.d_theory, toExplain.d_timestamp);
