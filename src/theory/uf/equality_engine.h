@@ -263,6 +263,14 @@ class EqualityEngine : public context::ContextNotifyObj, protected EnvObj
    * Returns true if the engine is in a consistent state.
    */
   bool consistent() const { return !d_done; }
+  /**
+   * The number of (dis)equalities asserted to this engine in the current
+   * context. Disequalities count too: they are asserted as a merge of the
+   * equality node with false. The count is context-dependent, so it is a
+   * fingerprint of the current state: two calls returning the same value with
+   * no term added in between saw the same equivalence classes.
+   */
+  size_t getNumAssertedEqualities() const { return d_assertedEqualitiesCount; }
   /** Identify this equality engine (for debugging, etc..) */
   std::string identify() const;
   /** Print the equivalence classes for debugging */

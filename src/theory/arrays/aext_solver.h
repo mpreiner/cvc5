@@ -161,6 +161,44 @@ class AextArraySolver : public ArraySolver
    */
   void mergeArraysModelOnly(TNode a, TNode b);
 
+  /**
+   * A fingerprint of everything check() reads: the number of (dis)equalities
+   * asserted to the equality engine, and the number of registered reads and
+   * writes. See the comment in check() for why two runs with the same
+   * fingerprint derive the same thing.
+   *
+   * WHY COUNTS IDENTIFY CONTENTS. They do not, in general: registering a read
+   * at one decision level, popping, and registering a different read leaves
+   * d_selects the same size with different elements. They do along a single
+   * context path, which is all this is ever compared over, because the stamp
+   * it is compared against lives in a context::CDO (see d_lastCheckState).
+   * d_selects and d_stores are CDLists, whose only mutations are push_back and
+   * a restore that truncates from the end, and the equality engine truncates
+   * its asserted-equality trail to getNumAssertedEqualities() on backtrack. So
+   * all three only grow as the path deepens, and a pop restores an earlier
+   * prefix exactly: two points on one path with equal counts hold the same
+   * elements and the same equivalence classes. In the example above the CDO
+   * has reverted to the shallower level's smaller size by the time the second
+   * read is registered, so the fingerprints differ and the check runs.
+   */
+  struct CheckState
+  {
+    size_t d_assertions = 0;
+    size_t d_selects = 0;
+    size_t d_stores = 0;
+    bool operator==(const CheckState& other) const
+    {
+      return d_assertions == other.d_assertions && d_selects == other.d_selects
+             && d_stores == other.d_stores;
+    }
+  };
+  /**
+   * State at the entry of the last completed check(). The default value is
+   * reached only before anything is registered or asserted, where check() has
+   * nothing to do anyway, so it needs no separate "unset" marker.
+   */
+  context::CDO<CheckState> d_lastCheckState;
+
   /** All registered SELECT terms (context-dependent) */
   context::CDList<TNode> d_selects;
   /** All registered STORE terms (context-dependent) */
@@ -214,6 +252,14 @@ class AextArraySolver : public ArraySolver
   NodeSet d_indexSplitCache;
 
   //--------------------------------- per-check data structures
+  /**
+   * State the structures in this block were last built at. Unlike
+   * d_lastCheckState this is NOT context-dependent, because the structures it
+   * describes are not either: after a pop they still hold whatever the deepest
+   * check computed. Skipping a check requires both stamps to match, so that
+   * what computeCareGraph() reads really does belong to the current state.
+   */
+  CheckState d_perCheckState;
   std::vector<std::pair<TNode, TNode>> d_pendingCarePairs;
   std::unordered_set<Node> d_pendingCarePairCache;
   std::unordered_set<Node> d_checkAccessCache;
@@ -283,6 +329,7 @@ class AextArraySolver : public ArraySolver
   IntStat d_numDisequalityLemmas;
   IntStat d_numConstArrayLemmas;
   IntStat d_numCheckCalls;
+  IntStat d_numCheckSkips;
   IntStat d_numPropagationsDown;
   IntStat d_numPropagationsUp;
   IntStat d_numRIntro2Propagations;

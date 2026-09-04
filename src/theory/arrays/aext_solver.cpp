@@ -35,6 +35,7 @@ AextArraySolver::AextArraySolver(Env& env,
                                  context::CDO<bool>& sharedTerms)
     : ArraySolver(
           env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
+      d_lastCheckState(context()),
       d_selects(context()),
       d_stores(context()),
       d_arrayDisequalities(context()),
@@ -53,6 +54,8 @@ AextArraySolver::AextArraySolver(Env& env,
           "theory::arrays::aext::numConstArrayLemmas")),
       d_numCheckCalls(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCheckCalls")),
+      d_numCheckSkips(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numCheckSkips")),
       d_numPropagationsDown(statisticsRegistry().registerInt(
           "theory::arrays::aext::numPropagationsDown")),
       d_numPropagationsUp(statisticsRegistry().registerInt(
@@ -203,6 +206,34 @@ void AextArraySolver::check(Theory::Effort level)
     return;
   }
 
+  // Skip the check if nothing it reads has changed since the last one that ran
+  // to completion. The propagation below is a function of the equality engine
+  // and of d_selects / d_stores alone, so it would rebuild the same
+  // d_arrayModels and reach the same conflicts. Those conflicts are all either
+  // already recorded in a deduplication cache (CongR, RIntro2, index splits) or
+  // already witnessed (DisEq), so a repeat run emits nothing new -- at most a
+  // duplicate AccessStore lemma, which has no cache of its own.
+  //
+  // The state is sampled on entry, not on exit: check() itself asserts RIntro2
+  // facts, and stamping the post-merge state would claim a complete check at a
+  // state we never actually ran on.
+  //
+  // Both stamps have to match. d_lastCheckState is context-dependent, so it
+  // alone establishes that no fact was asserted and no term registered since a
+  // complete check *on the current context path* -- a plain counter would
+  // wrongly match a sibling branch that asserted a different fact and landed on
+  // the same count. d_perCheckState is not context-dependent, so it alone
+  // establishes that the structures below still describe this state -- after a
+  // pop they hold what the deeper check left behind, which computeCareGraph()
+  // must not read.
+  CheckState state{
+      d_ee->getNumAssertedEqualities(), d_selects.size(), d_stores.size()};
+  if (d_lastCheckState.get() == state && d_perCheckState == state)
+  {
+    ++d_numCheckSkips;
+    return;
+  }
+
   ++d_numCheckCalls;
   Trace("arrays::aext") << "AextArraySolver::check() with " << d_selects.size()
                         << " selects and " << d_stores.size() << " stores"
@@ -215,6 +246,7 @@ void AextArraySolver::check(Theory::Effort level)
   d_pendingCarePairCache.clear();
   d_checkAccessCache.clear();
   d_arrayModels.clear();
+  d_perCheckState = state;
 
   // Build the parent store map for RowU propagation.
   buildParentMap();
@@ -271,6 +303,13 @@ void AextArraySolver::check(Theory::Effort level)
                    InferenceId::ARRAYS_AEXT_INDEX_SPLIT);
       }
     }
+  }
+
+  // Only a run that got all the way here without a conflict licenses a skip:
+  // an aborted one may have left work undone.
+  if (!d_state.isInConflict())
+  {
+    d_lastCheckState = state;
   }
 
   Trace("arrays::aext") << "AextArraySolver::check() done" << std::endl;
