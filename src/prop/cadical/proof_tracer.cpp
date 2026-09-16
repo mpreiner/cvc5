@@ -99,7 +99,7 @@ ProofTracer::ProofTracer(const CadicalPropagator& propagator)
 {
 }
 
-void ProofTracer::add_original_clause(uint64_t clause_id,
+void ProofTracer::add_original_clause(int64_t clause_id,
                                       CVC5_UNUSED bool redundant,
                                       const std::vector<int>& clause,
                                       CVC5_UNUSED bool restored)
@@ -110,12 +110,18 @@ void ProofTracer::add_original_clause(uint64_t clause_id,
   Trace("cadical::prooftracer") << d_clauses.at(clause_id) << std::endl;
 }
 
-void ProofTracer::add_derived_clause(CVC5_UNUSED uint64_t clause_id,
+void ProofTracer::add_derived_clause(CVC5_UNUSED int64_t clause_id,
                                      bool redundant,
+                                     CVC5_UNUSED int witness,
                                      const std::vector<int>& clause,
-                                     const std::vector<uint64_t>& antecedents)
+                                     const std::vector<int64_t>& antecedents)
 {
   (void)redundant;
+  // A non-zero witness marks a RAT clause, which does not correspond to a
+  // resolution chain and thus cannot be handled by chain_resolution_step().
+  // CaDiCaL only derives RAT clauses for bounded variable addition (option
+  // `factor`), which we do not enable.
+  Assert(witness == 0);
   d_clauses.emplace(
       clause_id,
       ClauseInfo(clause_id, ClauseType::DERIVED, clause, antecedents));
@@ -123,9 +129,9 @@ void ProofTracer::add_derived_clause(CVC5_UNUSED uint64_t clause_id,
 }
 
 void ProofTracer::add_assumption_clause(
-    uint64_t clause_id,
+    int64_t clause_id,
     const std::vector<int>& clause,
-    const std::vector<uint64_t>& antecedents)
+    const std::vector<int64_t>& antecedents)
 {
   // Assumption clauses are the negation of the core of failed/unsat
   // assumptions.
@@ -136,21 +142,21 @@ void ProofTracer::add_assumption_clause(
 }
 
 void ProofTracer::conclude_unsat(CVC5_UNUSED CaDiCaL::ConclusionType type,
-                                 const std::vector<uint64_t>& clause_ids)
+                                 const std::vector<int64_t>& clause_ids)
 {
   // Store final clause ids that concluded unsat.
   d_final_clauses = clause_ids;
 }
 
-void ProofTracer::compute_proof_core(std::vector<uint64_t>& core) const
+void ProofTracer::compute_proof_core(std::vector<int64_t>& core) const
 {
-  std::vector<uint64_t> visit{d_final_clauses};
-  std::unordered_set<uint64_t> visited;
+  std::vector<int64_t> visit{d_final_clauses};
+  std::unordered_set<int64_t> visited;
 
   // Trace back from final clause ids (empty clause) to original clauses.
   while (!visit.empty())
   {
-    const uint64_t clause_id = visit.back();
+    const int64_t clause_id = visit.back();
     visit.pop_back();
 
     if (visited.insert(clause_id).second)
@@ -175,7 +181,7 @@ void ProofTracer::compute_proof_core(std::vector<uint64_t>& core) const
 std::shared_ptr<ProofNode> ProofTracer::get_chain_resolution_proof(
     ProofNodeManager* pnm, NodeManager* nm, TheoryProxy* proxy)
 {
-  std::vector<uint64_t> core;
+  std::vector<int64_t> core;
   compute_proof_core(core);
   // Sort core clause ids in ascending order to construct proof steps
   // starting from the original clauses.
@@ -187,8 +193,8 @@ std::shared_ptr<ProofNode> ProofTracer::get_chain_resolution_proof(
     alits.insert(lit.getSatVariable());
   }
 
-  std::unordered_map<uint64_t, std::shared_ptr<ProofNode>> steps;
-  for (const uint64_t cid : core)
+  std::unordered_map<int64_t, std::shared_ptr<ProofNode>> steps;
+  for (const int64_t cid : core)
   {
     const auto& clause = d_clauses.at(cid);
     if (clause.type == ClauseType::DERIVED)
@@ -236,11 +242,11 @@ bool ProofTracer::mark_var(std::unordered_map<int32_t, uint8_t>& marked_vars,
 }
 
 std::shared_ptr<ProofNode> ProofTracer::chain_resolution_step(
-    uint64_t cid,
+    int64_t cid,
     TheoryProxy* proxy,
     ProofNodeManager* pnm,
     NodeManager* nm,
-    const std::unordered_map<uint64_t, std::shared_ptr<ProofNode>>& steps,
+    const std::unordered_map<int64_t, std::shared_ptr<ProofNode>>& steps,
     const std::unordered_set<int64_t>& activation_literals)
 {
   const auto& cl = d_clauses.at(cid);
@@ -263,7 +269,7 @@ std::shared_ptr<ProofNode> ProofTracer::chain_resolution_step(
     // Antecedants are stored in the order they were resolved. Thus, we have
     // to process them in reverse order, starting from the last id.
     size_t idx = size - i - 1;
-    uint64_t aid = antecedents[idx];
+    int64_t aid = antecedents[idx];
     const auto& clause = d_clauses.at(aid);
     for (int32_t lit : clause.literals)
     {

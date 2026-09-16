@@ -51,6 +51,11 @@ cvc5 1.4.0 prerelease
   Option `--sat-solver` is now listed among the most commonly-used options in
   `--help`.
 
+- Bumped CaDiCaL to version 3.0.1. This is the first upstream release that
+  includes the `elevate` feature for less disruptive clause import with user
+  propagators, which previously required building against a CaDiCaL fork.
+  Building against a system CaDiCaL now requires version 3.0.1.
+
 - Option `--cegqi-midpoint` is now **enabled by default**, and is now an expert
   option. Counterexample-based quantifier instantiation now chooses
   substitutions based on midpoints of lower and upper bounds instead of using

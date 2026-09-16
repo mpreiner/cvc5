@@ -63,9 +63,9 @@ if(CaDiCaL_INCLUDE_DIR AND CaDiCaL_LIBRARIES)
   endif()
 
   # Minimum supported version
-  set(CaDiCaL_FIND_VERSION "2.1.0")
+  set(CaDiCaL_FIND_VERSION "3.0.1")
   # Maximum supported version
-  set(CaDiCaL_FIND_VERSION_MAX "2.1.3")
+  set(CaDiCaL_FIND_VERSION_MAX "3.0.1")
 
   # Set FOUND_SYSTEM to true; check_system_version will unset this if the
   # version is less than the minimum required
@@ -84,32 +84,43 @@ if(NOT CaDiCaL_FOUND_SYSTEM)
   include(CheckSymbolExists)
   include(ExternalProject)
 
-  set(CaDiCaL_VERSION "rel-2.1.3-elevate")
-  set(CaDiCaL_CHECKSUM "15e1e82f7f9a9da0e97070cb8ac41d5b32139f65d54f72d2ff84849b0466ef92")
+  set(CaDiCaL_VERSION "rel-3.0.1")
+  set(CaDiCaL_CHECKSUM "0a8ea563b5a25f5aa064634814edab45cc0e45111ea0f5d412a565f806fd7e11")
 
   # avoid configure script and instantiate the makefile manually the configure
   # scripts unnecessarily fails for cross compilation thus we do the bare
   # minimum from the configure script here
-  set(CaDiCaL_CXXFLAGS "-fPIC -O3 -DNDEBUG -DQUIET -std=c++11")
+  #
+  # Note: Since version 2.2.0, CaDiCaL also ships C sources (the `kitten`
+  #       sub-solver used for clausal sweeping), which are compiled with
+  #       `CC`/`CFLAGS`. The configure script uses the same flags for C and
+  #       C++, except for the C++ standard.
+  set(CaDiCaL_FLAGS "-fPIC -O3 -DNDEBUG -DQUIET")
   if(CMAKE_CROSSCOMPILING_MACOS)
-    set(CaDiCaL_CXXFLAGS "${CaDiCaL_CXXFLAGS} -arch ${CMAKE_OSX_ARCHITECTURES}")
+    string(APPEND CaDiCaL_FLAGS " -arch ${CMAKE_OSX_ARCHITECTURES}")
   endif()
 
   # check for getc_unlocked
   check_symbol_exists("getc_unlocked" "cstdio" HAVE_UNLOCKED_IO)
   if(NOT HAVE_UNLOCKED_IO)
-    string(APPEND CaDiCaL_CXXFLAGS " -DNUNLOCKED")
+    string(APPEND CaDiCaL_FLAGS " -DNUNLOCKED")
   endif()
   # check for closefrom
   check_symbol_exists("closefrom" "fcntl.h" HAVE_CLOSEFROM)
   if(NOT HAVE_CLOSEFROM)
-    string(APPEND CaDiCaL_CXXFLAGS " -DNCLOSEFROM")
+    string(APPEND CaDiCaL_FLAGS " -DNCLOSEFROM")
   endif()
+
+  set(CaDiCaL_CXXFLAGS "${CaDiCaL_FLAGS} -std=c++11")
+  set(CaDiCaL_CFLAGS "${CaDiCaL_FLAGS}")
 
   # On macOS, we have to set `-isysroot` to make sure that include headers are
   # found because they are not necessarily installed at /usr/include anymore.
   if(CMAKE_OSX_SYSROOT)
-    string(APPEND CaDiCaL_CXXFLAGS " ${CMAKE_CXX_SYSROOT_FLAG} ${CMAKE_OSX_SYSROOT}")
+    string(APPEND CaDiCaL_CXXFLAGS
+           " ${CMAKE_CXX_SYSROOT_FLAG} ${CMAKE_OSX_SYSROOT}")
+    string(APPEND CaDiCaL_CFLAGS
+           " ${CMAKE_C_SYSROOT_FLAG} ${CMAKE_OSX_SYSROOT}")
   endif()
 
   if("${CMAKE_GENERATOR}" STREQUAL "Unix Makefiles")
@@ -139,7 +150,9 @@ if(NOT CaDiCaL_FOUND_SYSTEM)
     COMMAND
       sed -i.orig -e "s,@CXX@,${CMAKE_CXX_COMPILER}," -e
       "s,@CXXFLAGS@,${CaDiCaL_CXXFLAGS}," -e
-      "s,@ROOT@,${CaDiCaL_SOURCE_DIR}," -e "s,@CONTRIB@,no," ${USE_EMAR}
+      "s,@CC@,${CMAKE_C_COMPILER}," -e "s,@CFLAGS@,${CaDiCaL_CFLAGS}," -e
+      "s,@ROOT@,${CaDiCaL_SOURCE_DIR}," -e "s,@CONTRIB@,no," -e
+      "s,@GOALS@,libcadical.a," ${USE_EMAR}
       <SOURCE_DIR>/build/makefile
     BUILD_COMMAND ${make_cmd} -C <SOURCE_DIR>/build libcadical.a
     INSTALL_COMMAND ${CMAKE_COMMAND} -E copy <SOURCE_DIR>/build/libcadical.a

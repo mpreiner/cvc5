@@ -182,7 +182,7 @@ versions; more recent versions should be compatible.
   + module `pyparsing <https://pypi.org/project/pyparsing/>`_
 - `GMP >= v6.3 (GNU Multi-Precision arithmetic library) <https://gmplib.org>`_
 - `MPFR >= v4.2.1 (GNU Multiple Precision Floating-Point Reliable Library) <https://www.mpfr.org>`_
-- `CaDiCaL >= 2.1.0 (SAT solver) <https://github.com/arminbiere/cadical>`_
+- `CaDiCaL >= 3.0.1 (SAT solver) <https://github.com/arminbiere/cadical>`_
 - `SymFPU <https://github.com/martin-cs/symfpu/tree/main>`_
 
 If ``--auto-download`` is given, the Python modules will be installed automatically in

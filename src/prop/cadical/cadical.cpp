@@ -100,8 +100,9 @@ void CadicalSolver::initialize()
     d_solver->set("walk", 0);
     d_solver->set("lucky", 0);
     // ilb currently does not play well with user propagators
+    // Note: Since CaDiCaL 2.2.0, `ilb` subsumes the removed `ilbassumptions`
+    //       option (0 = off, 1 = only assumptions, 2 = full reuse).
     d_solver->set("ilb", 0);
-    d_solver->set("ilbassumptions", 0);
     d_solver->connect_fixed_listener(d_propagator.get());
     d_solver->connect_external_propagator(d_propagator.get());
   }

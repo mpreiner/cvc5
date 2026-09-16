@@ -56,44 +56,45 @@ class ProofTracer : public CaDiCaL::Tracer
   struct ClauseInfo
   {
     ClauseInfo() = default;
-    ClauseInfo(uint64_t id,
+    ClauseInfo(int64_t id,
                ClauseType ctype,
                const std::vector<int32_t>& lits,
-               const std::vector<uint64_t>& ants = {})
+               const std::vector<int64_t>& ants = {})
         : clause_id(id), type(ctype), literals(lits), antecedents(ants)
     {
     }
 
-    uint64_t clause_id;
+    int64_t clause_id;
     ClauseType type;
     std::vector<int32_t> literals;
-    std::vector<uint64_t> antecedents;
+    std::vector<int64_t> antecedents;
   };
 
   ProofTracer(const CadicalPropagator& propagator);
 
-  void add_original_clause(uint64_t clause_id,
+  void add_original_clause(int64_t clause_id,
                            bool redundant,
                            const std::vector<int>& clause,
                            bool restored) override;
 
-  void add_derived_clause(uint64_t clause_id,
+  void add_derived_clause(int64_t clause_id,
                           bool redundant,
+                          int witness,
                           const std::vector<int>& clause,
-                          const std::vector<uint64_t>& antecedents) override;
+                          const std::vector<int64_t>& antecedents) override;
 
-  void add_assumption_clause(uint64_t clause_id,
+  void add_assumption_clause(int64_t clause_id,
                              const std::vector<int>& clause,
-                             const std::vector<uint64_t>& antecedents) override;
+                             const std::vector<int64_t>& antecedents) override;
 
   void conclude_unsat(CaDiCaL::ConclusionType type,
-                      const std::vector<uint64_t>& clause_ids) override;
+                      const std::vector<int64_t>& clause_ids) override;
 
   /**
    * Backwards traversal of clausal proof starting from the empty clause.
    * @param core Proof core containing visited clause ids.
    */
-  void compute_proof_core(std::vector<uint64_t>& core) const;
+  void compute_proof_core(std::vector<int64_t>& core) const;
 
   /**
    * Generates the chain resolution proof from CaDiCaL's LRUP proof.
@@ -139,18 +140,18 @@ class ProofTracer : public CaDiCaL::Tracer
    * @return A chain resolution step for producing clause cid.
    */
   std::shared_ptr<ProofNode> chain_resolution_step(
-      uint64_t cid,
+      int64_t cid,
       TheoryProxy* proxy,
       ProofNodeManager* pnm,
       NodeManager* nm,
-      const std::unordered_map<uint64_t, std::shared_ptr<ProofNode>>& steps,
+      const std::unordered_map<int64_t, std::shared_ptr<ProofNode>>& steps,
       const std::unordered_set<int64_t>& activation_literals);
 
   const CadicalPropagator& d_propagator;
   /** Maps clause ids to clause info. */
-  std::unordered_map<uint64_t, ClauseInfo> d_clauses;
+  std::unordered_map<int64_t, ClauseInfo> d_clauses;
   /** Stores the final clause ids used to conclude unsat. */
-  std::vector<uint64_t> d_final_clauses;
+  std::vector<int64_t> d_final_clauses;
 };
 
 }  // namespace cvc5::internal::prop::cadical
