@@ -1,0 +1,65 @@
+@@ Fix a performance regression of CaDiCaL >= 2.2.0 when solving under
+@@ assumptions, which is how cvc5's bit-blasting bit-vector solver uses it
+@@ (see BVSolverBitblast, which passes the asserted facts as assumptions).
+@@
+@@ Glue (LBD) counts the number of distinct decision levels of a learned
+@@ clause. Assumptions are pseudo-decisions taking one level each, and they
+@@ are fixed for the whole solve() call, so the glue of every clause that
+@@ depends on k assumptions is inflated by up to k. Since 2.2.0 the reduce
+@@ policy keeps tier1 clauses while 'used > 0' and tier2 clauses used since
+@@ the previous reduction, but applies no such protection to tier3, so an
+@@ inflated glue means freshly learned clauses are dropped at the next
+@@ reduction. On QF_BV/Sage2 this costs a factor of 4-19 (bench_8663 goes
+@@ from 21s with CaDiCaL 2.1.3 to 390s with 3.0.1).
+@@
+@@ Counting the whole assumption prefix as a single level fixes this and is
+@@ a no-op when no assumptions are used.
+diff -urN a/src/analyze.cpp b/src/analyze.cpp
+--- a/src/analyze.cpp
++++ b/src/analyze.cpp
+@@ -206,9 +206,19 @@
+ int Internal::recompute_glue (Clause *c) {
+   int res = 0;
+   const int64_t stamp = ++stats.recomputed;
++  const int prefix = (int) assumptions.size ();
++  bool counted_prefix = false;
+   for (const auto &lit : *c) {
+     assert (val (lit));
+     int level = var (lit).level;
++    if (prefix && level > 0 && level <= prefix) {
++      // the whole assumption prefix counts as a single level (see 'analyze')
++      if (counted_prefix)
++        continue;
++      counted_prefix = true;
++      res++;
++      continue;
++    }
+     assert (gtab[level] <= stamp);
+     if (gtab[level] == stamp)
+       continue;
+@@ -1276,7 +1286,24 @@
+   // Update glue and learned (1st UIP literals) statistics.
+   //
+   int size = (int) clause.size ();
+-  const int glue = (int) levels.size () - 1;
++  // Assumption levels are not search decisions: they are fixed for the
++  // whole 'solve' call. Counting each of them as a separate level inflates
++  // the glue of every clause that depends on the assumptions, which pushes
++  // those clauses into tier3 (and thus out of the clause data base at the
++  // next reduction). Count the whole assumption prefix as one level. This
++  // is a no-op if there are no assumptions.
++  int glue = (int) levels.size () - 1;
++  {
++    const int prefix = (int) assumptions.size ();
++    if (prefix) {
++      int in_prefix = 0;
++      for (const auto &l : levels)
++        if (l > 0 && l <= prefix)
++          in_prefix++;
++      if (in_prefix > 1)
++        glue -= in_prefix - 1;
++    }
++  }
+   LOG (clause, "1st UIP size %d and glue %d clause", size, glue);
+   UPDATE_AVERAGE (averages.current.glue.fast, glue);
+   UPDATE_AVERAGE (averages.current.glue.slow, glue);

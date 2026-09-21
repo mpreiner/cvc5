@@ -84,6 +84,8 @@ if(NOT CaDiCaL_FOUND_SYSTEM)
   include(CheckSymbolExists)
   include(ExternalProject)
 
+  find_package(Patch)
+
   set(CaDiCaL_VERSION "rel-3.0.1")
   set(CaDiCaL_CHECKSUM "0a8ea563b5a25f5aa064634814edab45cc0e45111ea0f5d412a565f806fd7e11")
 
@@ -143,6 +145,11 @@ if(NOT CaDiCaL_FOUND_SYSTEM)
     BUILD_IN_SOURCE ON
     URL https://github.com/arminbiere/cadical/archive/${CaDiCaL_VERSION}.tar.gz
     URL_HASH SHA256=${CaDiCaL_CHECKSUM}
+    # Fixes a performance regression of CaDiCaL >= 2.2.0 when solving under
+    # assumptions, which is how the bit-blasting bit-vector solver uses it.
+    # See the patch for details.
+    PATCH_COMMAND ${Patch_EXECUTABLE} -p1 -d <SOURCE_DIR>
+        -i ${CMAKE_CURRENT_LIST_DIR}/deps-utils/cadical-3.0.1-assumption-glue.patch
     CONFIGURE_COMMAND mkdir -p <SOURCE_DIR>/build
     # avoid configure script, prepare the makefile manually
     COMMAND ${CMAKE_COMMAND} -E copy <SOURCE_DIR>/makefile.in
