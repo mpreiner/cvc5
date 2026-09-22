@@ -56,8 +56,8 @@ diff -urN a/src/analyze.cpp b/src/analyze.cpp
 +      for (const auto &l : levels)
 +        if (l > 0 && l <= prefix)
 +          in_prefix++;
-+      if (in_prefix > 1)
-+        glue -= in_prefix - 1;
++      // if (in_prefix > 1)
++        glue -= in_prefix;
 +    }
 +  }
    LOG (clause, "1st UIP size %d and glue %d clause", size, glue);
