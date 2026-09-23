@@ -229,6 +229,10 @@ enum class InferenceId
   ARRAYS_AEXT_CONGRUENCE,
   // extensionality witness lemma (DisEq) from aext solver
   ARRAYS_AEXT_DISEQUALITY,
+  // read over a constant array (AccessConstArray) from aext solver
+  ARRAYS_AEXT_CONST_ARRAY,
+  // read-over-write introduction (RIntro2) from aext solver
+  ARRAYS_AEXT_RINTRO2,
   // ---------------------------------- end arrays theory
 
   // ---------------------------------- bags theory

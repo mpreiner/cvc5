@@ -12,6 +12,7 @@
 
 #include "theory/arrays/inference_manager.h"
 
+#include "options/arrays_options.h"
 #include "options/smt_options.h"
 #include "proof/proof_node_manager.h"
 #include "proof/trust_id.h"
@@ -42,13 +43,25 @@ InferenceManager::InferenceManager(Env& env, Theory& t, TheoryState& state)
 
 bool InferenceManager::isAextInference(InferenceId id)
 {
+  // Every id listed here is emitted by AextArraySolver and by nothing else.
+  // That exclusivity is the whole contract: this predicate selects the proof
+  // path, and ArraysInferProofCons reconstructs a proof by re-parsing the
+  // explanation against the shape AEXT builds it in. An id shared with
+  // ArraySolverDefault would route that solver's inferences here too, where
+  // the shapes do not match -- silently losing the proper proof step the
+  // legacy convert() below produces for it, or worse, misreading the
+  // explanation. AEXT therefore has its own ids for the two rules whose
+  // conclusions the default solver also derives: ARRAYS_AEXT_CONST_ARRAY
+  // (vs ARRAYS_CONST_ARRAY_DEFAULT) and ARRAYS_AEXT_RINTRO2 (vs
+  // ARRAYS_READ_OVER_WRITE).
   switch (id)
   {
     case InferenceId::ARRAYS_AEXT_CONGRUENCE:
     case InferenceId::ARRAYS_AEXT_ROW:
     case InferenceId::ARRAYS_AEXT_DISEQUALITY:
     case InferenceId::ARRAYS_AEXT_INDEX_SPLIT:
-    case InferenceId::ARRAYS_CONST_ARRAY_DEFAULT: return true;
+    case InferenceId::ARRAYS_AEXT_CONST_ARRAY:
+    case InferenceId::ARRAYS_AEXT_RINTRO2: return true;
     default: return false;
   }
 }
@@ -60,12 +73,18 @@ bool InferenceManager::assertInference(
                         << (polarity ? Node(atom) : atom.notNode()) << " by "
                         << reason << "; " << id << std::endl;
   Assert(atom.getKind() == Kind::EQUAL);
+  // Guard the contract documented on isAextInference: an AEXT id must never
+  // reach here from ArraySolverDefault, since the proof path it selects
+  // re-parses the explanation against AEXT's shape.
+  Assert(!isAextInference(id)
+         || options().arrays.arraysSolver == options::ArraysSolverMode::AEXT)
+      << "AEXT inference " << id << " emitted while the default array solver "
+                                    "is active";
   if (isProofEnabled())
   {
     Node fact = polarity ? Node(atom) : atom.notNode();
-    // For AEXT inferences (and RIntro2 which uses ARRAYS_READ_OVER_WRITE),
-    // use the lazy proof constructor.
-    if (isAextInference(id) || id == InferenceId::ARRAYS_READ_OVER_WRITE)
+    // For AEXT inferences, use the lazy proof constructor.
+    if (isAextInference(id))
     {
       // Flatten reason into a vector of individual literals.
       std::vector<Node> expVec;
@@ -108,12 +127,19 @@ bool InferenceManager::arrayLemma(Node conc,
 {
   Trace("arrays-infer") << "TheoryArrays::arrayLemma: " << conc << " by " << exp
                         << "; " << id << std::endl;
+  // Guard the contract documented on isAextInference: an AEXT id must never
+  // reach here from ArraySolverDefault, since the proof path it selects
+  // re-parses the explanation against AEXT's shape.
+  Assert(!isAextInference(id)
+         || options().arrays.arraysSolver == options::ArraysSolverMode::AEXT)
+      << "AEXT inference " << id << " emitted while the default array solver "
+                                    "is active";
   NodeManager* nm = nodeManager();
   if (isProofEnabled())
   {
-    // For AEXT inferences (and RIntro2), build proof eagerly via the
-    // proof constructor, following the datatypes processDtLemma pattern.
-    if (isAextInference(id) || id == InferenceId::ARRAYS_READ_OVER_WRITE)
+    // For AEXT inferences, build proof eagerly via the proof constructor,
+    // following the datatypes processDtLemma pattern.
+    if (isAextInference(id))
     {
       // Create a local (non-context-dependent) proof constructor.
       // We must build the proof eagerly while EE state is still valid.

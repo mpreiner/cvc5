@@ -136,6 +136,7 @@ set(regress_0_tests
   regress0/arrays/constarr.smt2
   regress0/arrays/constarr2.cvc.smt2
   regress0/arrays/constarr2.smt2
+  regress0/arrays/default-solver-proof-ids.smt2
   regress0/arrays/dd_ios_t1_norm_op.smt2
   regress0/arrays/dd_storecomm_norm_op.smt2
   regress0/arrays/incorrect1.smtv1.smt2

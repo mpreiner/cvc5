@@ -530,7 +530,7 @@ void AextArraySolver::checkAccess(TNode select)
             Trace("arrays::aext") << "AccessConstArray: " << reason << " => "
                                   << conc << std::endl;
             d_im.arrayLemma(conc,
-                            InferenceId::ARRAYS_CONST_ARRAY_DEFAULT,
+                            InferenceId::ARRAYS_AEXT_CONST_ARRAY,
                             reason,
                             ProofRule::ARRAYS_READ_OVER_WRITE_1,
                             std::move(paths));
@@ -849,12 +849,12 @@ void AextArraySolver::propagateRIntro2()
         Trace("arrays::aext")
             << "RIntro2: " << reason << " => " << eq << std::endl;
         d_im.arrayLemma(eq,
-                        InferenceId::ARRAYS_READ_OVER_WRITE,
+                        InferenceId::ARRAYS_AEXT_RINTRO2,
                         reason,
                         ProofRule::ARRAYS_READ_OVER_WRITE);
         d_im.assertInference(eq,
                              true,
-                             InferenceId::ARRAYS_READ_OVER_WRITE,
+                             InferenceId::ARRAYS_AEXT_RINTRO2,
                              reason,
                              ProofRule::ARRAYS_READ_OVER_WRITE);
         ++d_numRIntro2Propagations;

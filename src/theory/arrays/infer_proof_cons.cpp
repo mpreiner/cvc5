@@ -119,10 +119,14 @@ void ArraysInferProofCons::convert(const InferInfo& ii,
   bool success = false;
   switch (id)
   {
-    // Note there is deliberately no ARRAYS_READ_OVER_WRITE_1 case: that id is
-    // not in InferenceManager::isAextInference, so it never reaches this
-    // converter -- it takes the legacy InferenceManager::convert() path. If it
-    // is ever routed here it falls through to the trusted step below.
+    // Note there is deliberately no case for the ids the default solver also
+    // emits -- ARRAYS_READ_OVER_WRITE, ARRAYS_READ_OVER_WRITE_1 and
+    // ARRAYS_CONST_ARRAY_DEFAULT. None of them is in
+    // InferenceManager::isAextInference, so none reaches this converter; they
+    // take the legacy InferenceManager::convert() path, which knows their
+    // explanation shape. AEXT's counterparts of the latter two are
+    // ARRAYS_AEXT_RINTRO2 and ARRAYS_AEXT_CONST_ARRAY, handled below. Anything
+    // that does reach here unhandled falls through to the trusted step.
     case InferenceId::ARRAYS_AEXT_CONGRUENCE:
     {
       convertCongruence(ii, conc, expv, cdp);
@@ -135,13 +139,13 @@ void ArraysInferProofCons::convert(const InferInfo& ii,
       success = true;
     }
     break;
-    case InferenceId::ARRAYS_CONST_ARRAY_DEFAULT:
+    case InferenceId::ARRAYS_AEXT_CONST_ARRAY:
     {
       convertAccessConstArray(ii, conc, expv, cdp);
       success = true;
     }
     break;
-    case InferenceId::ARRAYS_READ_OVER_WRITE:
+    case InferenceId::ARRAYS_AEXT_RINTRO2:
     {
       convertRIntro2(conc, expv, cdp);
       success = true;
