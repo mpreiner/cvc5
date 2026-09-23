@@ -997,6 +997,42 @@ void AextArraySolver::augmentModelSelects(
   // The AEXT solver does not create explicit select(base, i) terms via
   // Row lemmas, so the model builder needs to trace reads through stores
   // to ensure all arrays in a store chain get consistent values.
+  //
+  // WHY `!areEqual` IS THE RIGHT TEST, AND NOT TOO WEAK. Pushing read n into
+  // selects[rep(t[0])] across a store t asserts select(t[0], idx) = n, which
+  // needs idx != t[1]. The test below is only "not known equal", which is
+  // weaker -- so the question is whether an index pair can still be undecided
+  // here.
+  //
+  // It cannot, for any edge that matters. checkAccess walks the same graph
+  // under the same condition (`rep(t[1]) != indexRep` is `!areEqual` on
+  // representatives) and requests a split for every edge it takes, via
+  // d_pendingCarePairs; by the time a model is built, the SAT solver has
+  // decided each of them and the answer is in the equality engine. Three
+  // places where the two walks differ, and why none of them opens a gap:
+  //
+  //  - checkAccess stops at an array where a read with the same index
+  //    representative is already recorded (step 1). That other read carries on
+  //    from there and requests the same splits. Its index term differs, but
+  //    areEqual/areDisequal are representative-level, so it decides the same
+  //    question.
+  //  - checkAccess gates RowU on d_activeArrays; this walk does not. By the
+  //    invariant documented on d_activeArrays, every store class reachable
+  //    only through a gated edge is a singleton {s} with s a STORE -- and
+  //    TheoryArrays::collectModelValues builds its `arrays` list only from
+  //    classes holding a non-STORE term in termSet, so selects[rep(s)] is
+  //    never read. Descending back out of such a class reaches rep(s[0]),
+  //    which the walk has already visited. The gated region contributes
+  //    nothing to the model.
+  //  - checkAccess skips a pair whose split rewrites to a constant. Those are
+  //    two distinct constants, which the equality engine already knows to be
+  //    disequal.
+  //
+  // Do not "harden" this into areDisequal: that is strictly stronger than the
+  // condition checkAccess propagates under, and dropping an edge here does not
+  // make the model safer. The read stays pinned on the parent array, whose
+  // value is store(base, t[1], v), so leaving the base unpinned at idx makes
+  // the two disagree wherever the model picks idx != t[1].
 
   // Precompute map from child array rep to parent store nodes.
   std::unordered_map<TNode, std::vector<TNode>> parentStores;
