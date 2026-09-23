@@ -248,14 +248,30 @@ void AextArraySolver::check(Theory::Effort level)
   d_arrayModels.clear();
   d_perCheckState = state;
 
+  // RIntro2 theory propagation. This runs before the two maps below are built,
+  // because it asserts internal facts: the equalities it derives are between
+  // SELECT terms, but congruence turns those into array merges whenever the
+  // selects are store values. Building d_parentStores and d_activeArrays first
+  // left them keyed on representatives that are no longer representatives, and
+  // a missed d_parentStores lookup silently disables RowU -- the direction that
+  // costs satisfiability completeness. (Measured before the reorder:
+  // regress0/aufbv/fifo32bc06k08 had 15 of 108 checks where RIntro2 moved the
+  // equality engine.)
+  propagateRIntro2();
+  // Both maps below iterate equivalence classes, and EqClassIterator requires
+  // a consistent equality engine, so bail out before them if RIntro2 derived a
+  // conflict. Nothing is stamped into d_lastCheckState on this path, so the
+  // next check() redoes the work.
+  if (d_state.isInConflict())
+  {
+    return;
+  }
+
   // Build the parent store map for RowU propagation.
   buildParentMap();
 
   // Compute active arrays for RowU gating.
   computeActiveArrays();
-
-  // RIntro2 theory propagation
-  propagateRIntro2();
 
   // Propagate all registered selects through store chains.
   for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
