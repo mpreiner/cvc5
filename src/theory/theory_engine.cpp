@@ -2006,16 +2006,22 @@ TrustNode TheoryEngine::getExplanation(
         d_sharedSolver->explain(toExplain.d_node, toExplain.d_theory);
     if (texplanation.getNode() == toExplain.d_node)
     {
-      // The theory explained the literal by itself, i.e. it holds it as an
-      // assumption. This happens for literals a theory derived internally and
-      // marked self-explaining, which this class consequently has no record of
-      // in d_propagationMap. There is nothing left to expand, so keep the
-      // literal, exactly as we do for literals that came from the SAT solver.
+      // The theory answered the request with the literal it was asked about,
+      // i.e. it holds it as an assumption. That is a bug in the theory: it
+      // never sent us this literal, so we have no record of it in
+      // d_propagationMap and it has no business being self-explaining. The
+      // assertion below is deliberately kept, and a debug build still aborts
+      // here naming the offender -- that message is a far better diagnosis
+      // than anything the recovery can produce.
       //
-      // Pushing it back onto explanationVector instead does not terminate: the
-      // copy carries the same timestamp, so the cache test above (which skips
-      // only strictly older entries) does not filter it, and the same trivial
-      // explanation is re-derived until memory runs out.
+      // The recovery exists for production builds only, and only because the
+      // alternative is not a wrong answer but a hang: pushing the literal back
+      // onto explanationVector gives the copy an unchanged timestamp, the
+      // cache test above skips only strictly older entries, so the same
+      // trivial explanation is re-derived until memory runs out. Keeping the
+      // literal instead, exactly as the THEORY_SAT_SOLVER branch above does,
+      // leaves nothing to expand; treating it as an assumption only weakens
+      // the resulting clause, which stays valid.
       Assert(false) << "wasn't sent to you, so why are you explaining it "
                        "trivially, for fact "
                     << toExplain.d_node;
