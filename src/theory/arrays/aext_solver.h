@@ -132,6 +132,14 @@ class AextArraySolver : public ArraySolver
    * redundant, unused by the proof reconstruction, and only weakens the
    * lemma. CongR must pass true, because convertCongruence bridges its two
    * path endpoints through exactly these array equalities.
+   *
+   * @return the array the path arrives at, or a null TNode if no path was
+   * found. A null return should not happen -- the BFS explores a superset of
+   * what forward propagation reached -- and asserts in a debug build, but it
+   * is reported rather than walked off the end of, so a production build
+   * degrades to dropping the lemma. On failure `conds` and `edges` are left
+   * exactly as they were passed in, which matters for CongR: it fills one
+   * `conds` from two calls.
    */
   TNode findPathConditions(TNode select,
                            TNode targetRep,

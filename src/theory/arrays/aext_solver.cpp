@@ -443,8 +443,16 @@ void AextArraySolver::checkAccess(TNode select)
           Node conc = select.eqNode(existing.select);
           std::vector<Node> expVec;
           std::vector<std::vector<PathEdge>> paths(2);
-          findPathConditions(select, arrayRep, expVec, &paths[0]);
-          findPathConditions(existing.select, arrayRep, expVec, &paths[1]);
+          TNode entry1 =
+              findPathConditions(select, arrayRep, expVec, &paths[0]);
+          TNode entry2 =
+              findPathConditions(existing.select, arrayRep, expVec, &paths[1]);
+          if (entry1.isNull() || entry2.isNull())
+          {
+            // Unreachable by the argument on findPathConditions; drop the
+            // lemma rather than send one whose guard we cannot produce.
+            continue;
+          }
           if (index != existing.index)
           {
             expVec.push_back(index.eqNode(existing.index));
@@ -493,6 +501,10 @@ void AextArraySolver::checkAccess(TNode select)
               // than `entryArray = arrayRep`, so skip the latter.
               TNode entryArray = findPathConditions(
                   select, arrayRep, expVec, &paths[0], false);
+              if (entryArray.isNull())
+              {
+                break;
+              }
               if (index != n[1])
               {
                 expVec.push_back(index.eqNode(n[1]));
@@ -538,6 +550,10 @@ void AextArraySolver::checkAccess(TNode select)
             // equality, so do not emit it.
             TNode entryArray =
                 findPathConditions(select, arrayRep, expVec, &paths[0], false);
+            if (entryArray.isNull())
+            {
+              break;
+            }
             if (entryArray != n)
             {
               expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
@@ -624,6 +640,10 @@ TNode AextArraySolver::findPathConditions(TNode select,
   TNode indexRep = d_ee->getRepresentative(index);
   TNode startArray = select[0];
   TNode startRep = d_ee->getRepresentative(startArray);
+  // conds is appended to, not owned: CongR passes the same vector for both of
+  // its paths. Remember where this call's contribution starts so a failure can
+  // leave the vector exactly as it found it.
+  const size_t numCondsOnEntry = conds.size();
 
   // Trivial case: already at target.
   if (startRep == targetRep)
@@ -719,8 +739,24 @@ TNode AextArraySolver::findPathConditions(TNode select,
     }
   }
 
+  // The BFS explores a superset of what forward propagation reached -- it does
+  // not apply the d_activeArrays gate, and the equality engine does not move
+  // during the select loop -- so every conflict checkAccess detects has a path
+  // here. Should that ever stop holding, do not walk a tree that has no entry
+  // for targetRep: the walk below would dereference an end iterator, which
+  // Assert does not prevent in a production build. Report the failure instead
+  // and let the caller drop the lemma.
   Assert(found) << "findPathConditions: no path from " << startArray
                 << " to rep " << targetRep;
+  if (!found)
+  {
+    conds.resize(numCondsOnEntry);
+    if (pathEdges)
+    {
+      pathEdges->clear();
+    }
+    return TNode();
+  }
 
   // Walk back from targetRep to startRep, extracting conditions.
   TNode cur = targetRep;
