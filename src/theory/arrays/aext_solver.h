@@ -50,9 +50,11 @@
 #include "context/cdhashmap.h"
 #include "context/cdhashset.h"
 #include "context/cdlist.h"
+#include "context/cdqueue.h"
 #include "theory/arrays/array_solver.h"
 #include "theory/arrays/inference_manager.h"
 #include "theory/arrays/path_edge.h"
+#include "theory/decision_manager.h"
 #include "util/statistics_stats.h"
 
 namespace cvc5::internal {
@@ -93,6 +95,7 @@ class AextArraySolver : public ArraySolver
   void augmentModelSelects(std::map<Node, std::vector<Node>>& selects,
                            const std::set<Node>& termSet) override;
   void computeCareGraph(AddCarePairFn addCarePair) override;
+  void presolve() override;
   std::string identify() const override;
   //--------------------------------- end ArraySolver interface
 
@@ -160,6 +163,8 @@ class AextArraySolver : public ArraySolver
   void buildParentMap();
   /** Compute active array representatives for RowU gating. */
   void computeActiveArrays();
+  /** Next index equality for the decision engine, null if none pending. */
+  Node getNextDecisionRequest();
   //--------------------------------- end propagation
 
   /**
@@ -257,29 +262,33 @@ class AextArraySolver : public ArraySolver
   /** Deduplication cache for RIntro2 lemmas, keyed on the conclusion. */
   NodeSet d_rintro2LemmaCache;
   /**
-   * Deduplication cache for index split lemmas, keyed on the split.
+   * Index splits are driven through the decision engine rather than by
+   * sending the tautology (or e (not e)) as a lemma. Two pieces, with
+   * different lifetimes:
    *
-   * This one is on the USER context, unlike the two caches above. An index
-   * split is the tautology (or e (not e)); it is valid in every context, and
-   * it is sent with LemmaProperty::NONE, so the clause is neither REMOVABLE
-   * nor LOCAL and outlives any SAT-level backtracking. Its whole purpose is
-   * to get the atom registered with the SAT solver so the index equality gets
-   * decided, and a registered atom stays registered. Re-sending it after a
-   * pop therefore adds nothing and costs a duplicate clause.
+   * d_indexSplitLits maps an index equality to the literal
+   * Valuation::ensureLiteral produced for it. Registering an atom with the
+   * SAT solver is permanent, so this is on the USER context -- matching
+   * ArraySolverDefault's d_RowAlreadyAdded -- and exists only to avoid
+   * re-running CNF conversion on an atom that already has a literal.
    *
-   * It cost a lot. On regress0/aufbv/fifo32bc06k08, with this cache on the
-   * SAT context, a 20 second budget emitted 19,452 index splits against
-   * 36,793 CaDiCaL clauses total -- roughly half the clause database was the
-   * same tautologies over and over, and CnfStep was 24,034. On the user
-   * context the same budget emits 2,287 splits, 18,764 clauses and 6,729
-   * CnfStep. ArraySolverDefault already scopes its d_RowAlreadyAdded this way.
+   * d_decisionRequests is the queue the decision strategy drains. Unlike a
+   * clause, a decision request is consumed, and a backtrack can leave the
+   * literal unassigned again, so it must NOT be cached across contexts: every
+   * full-effort check re-requests a decision for each pair the equality
+   * engine still has undecided, and stops as soon as it is decided. The
+   * CDQueue is on the SAT context so that requests queued in an abandoned
+   * branch do not survive into a sibling.
    *
-   * Do not "fix" this back by analogy with d_congruenceLemmaCache: that one
-   * must be SAT-context-dependent because a CongR conclusion is not a
-   * tautology and its guard can be falsified under the very context that
-   * cached it. A tautology has no guard to falsify.
+   * WHY NOT THE LEMMA. The tautology got the atom registered and put it in a
+   * clause, but it is a clause the SAT solver can never learn anything from.
+   * On regress0/aufbv/fifo32bc06k08 with a 20 second budget those clauses
+   * were about half the database. ensureLiteral registers the atom with no
+   * clause at all, and the decision request is what actually makes the
+   * literal get assigned -- which is the only thing the split was ever for.
    */
-  NodeSet d_indexSplitCache;
+  context::CDHashMap<Node, Node> d_indexSplitLits;
+  context::CDQueue<Node> d_decisionRequests;
 
   //--------------------------------- per-check data structures
   /**
@@ -376,7 +385,29 @@ class AextArraySolver : public ArraySolver
   IntStat d_numPropagationsDown;
   IntStat d_numPropagationsUp;
   IntStat d_numRIntro2Propagations;
+  IntStat d_numIndexDecisions;
   //--------------------------------- end statistics
+
+  /**
+   * The decision strategy that drains d_decisionRequests, mirroring
+   * ArraySolverDefault's. Only one array solver exists at a time, so both
+   * register under DecisionManager::STRAT_ARRAYS.
+   */
+  class AextDecisionStrategy : public DecisionStrategy
+  {
+   public:
+    AextDecisionStrategy(AextArraySolver* solver);
+    void initialize() override;
+    Node getNextDecisionRequest() override;
+    std::string identify() const override;
+
+   private:
+    AextArraySolver* d_solver;
+  };
+  /** an instance of the above decision strategy */
+  std::unique_ptr<AextDecisionStrategy> d_dstrat;
+  /** Have we registered the above strategy? (context-independent) */
+  bool d_dstratInit;
 };
 
 }  // namespace arrays
