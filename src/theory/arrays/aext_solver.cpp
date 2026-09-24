@@ -325,23 +325,44 @@ void AextArraySolver::check(Theory::Effort level)
       {
         continue;
       }
+      // Skip the pair if the theory that owns the index already separates
+      // the two in its model. AEXT stepped over the store edge assuming
+      // i != j, and that is what the model says, so forcing the SAT solver
+      // to decide the literal establishes nothing it does not already have.
+      //
+      // This is the same bet computeCareGraph and ArraySolver::checkPair make
+      // for shared indices, and it is sound for the same reason. The status
+      // is only a prediction at an intermediate check, and a wrong prediction
+      // there costs nothing -- the pair comes back on the next check. What
+      // matters is the last full-effort check before a model is built: if no
+      // theory adds anything there, the model is built from exactly the
+      // candidate values this status was read off, so "differ in the model"
+      // is not a guess about that model, it is a report of it.
+      //
+      // Only EQUALITY_FALSE_IN_MODEL ever fires in practice; measured over
+      // regress0/aufbv/fifo32bc06k08, of 22,000 requests 20,767 were
+      // false-in-model, 1,233 true-in-model and none entailed either way. So
+      // restricting this to the entailed statuses would skip nothing at all.
+      EqualityStatus es = d_valuation.getEqualityStatus(t1, t2);
+      if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED
+          || es == EQUALITY_FALSE_IN_MODEL)
+      {
+        continue;
+      }
       Node split = t1.eqNode(t2);
       Node lit;
       auto itl = d_indexSplitLits.find(split);
       if (itl == d_indexSplitLits.end())
       {
         lit = d_valuation.ensureLiteral(split);
-        // Prefer the disequality. The propagation that asked for this split
-        // stepped over the store edge assuming i != j and guarded its lemma
-        // with it, so deciding that way puts the SAT solver on the side the
-        // theory has already done the work for. ArraySolverDefault prefers
-        // the opposite, and is right to: its Row lemma is
-        // (or (= i j) (= a[j] b[j])), which deciding i = j closes.
-        // Measured over 360 array benchmarks -- false 303 solved / 161.6s,
-        // no preference 302 / 165.8s, true 302 / 165.9s. The extra solve is
-        // aufbv/no_init_multi_delete14, which neither array solver had ever
-        // answered.
-        d_im.preferPhase(lit, false);
+        // No phase preference, deliberately, unlike ArraySolverDefault. One
+        // was worth 4s over 360 benchmarks while every undecided pair was
+        // being asked about, by steering the solver toward the disequality
+        // AEXT had assumed. The filter above now drops exactly those pairs,
+        // so what survives is the pairs whose model says i = j -- preferring
+        // the disequality there argues with the model. Measured with the
+        // filter in place: no preference 143.7s, prefer false 145.0s, prefer
+        // true 152.6s, all solving 303/360.
         d_indexSplitLits.insert(split, lit);
       }
       else

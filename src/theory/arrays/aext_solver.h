@@ -275,9 +275,9 @@ class AextArraySolver : public ArraySolver
    * d_decisionRequests is the queue the decision strategy drains. Unlike a
    * clause, a decision request is consumed, and a backtrack can leave the
    * literal unassigned again, so it must NOT be cached across contexts: every
-   * full-effort check re-requests a decision for each pair the equality
-   * engine still has undecided, and stops as soon as it is decided. The
-   * CDQueue is on the SAT context so that requests queued in an abandoned
+   * full-effort check re-requests a decision for each pair that is still
+   * undecided and that the owning theory's model does not already separate.
+   * The CDQueue is on the SAT context so that requests queued in an abandoned
    * branch do not survive into a sibling.
    *
    * WHY NOT THE LEMMA. The tautology got the atom registered and put it in a
