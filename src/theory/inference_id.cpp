@@ -144,6 +144,7 @@ const char* toString(InferenceId i)
     case InferenceId::ARRAYS_CONST_ARRAY_DEFAULT:
       return "ARRAYS_CONST_ARRAY_DEFAULT";
     case InferenceId::ARRAYS_EQ_TAUTOLOGY: return "ARRAYS_EQ_TAUTOLOGY";
+    case InferenceId::ARRAYS_AEXT_INDEX_SPLIT: return "ARRAYS_AEXT_INDEX_SPLIT";
     case InferenceId::ARRAYS_AEXT_ROW: return "ARRAYS_AEXT_ROW";
     case InferenceId::ARRAYS_AEXT_CONGRUENCE: return "ARRAYS_AEXT_CONGRUENCE";
     case InferenceId::ARRAYS_AEXT_DISEQUALITY: return "ARRAYS_AEXT_DISEQUALITY";

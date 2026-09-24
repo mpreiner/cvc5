@@ -43,8 +43,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_witnessRepPairCount(context()),
       d_congruenceLemmaCache(context()),
       d_rintro2LemmaCache(context()),
-      d_indexSplitLits(userContext()),
-      d_decisionRequests(context()),
+      d_indexSplitCache(userContext()),
       d_numCongruenceLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCongruenceLemmas")),
       d_numAccessStoreLemmas(statisticsRegistry().registerInt(
@@ -62,11 +61,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_numPropagationsUp(statisticsRegistry().registerInt(
           "theory::arrays::aext::numPropagationsUp")),
       d_numRIntro2Propagations(statisticsRegistry().registerInt(
-          "theory::arrays::aext::numRIntro2Propagations")),
-      d_numIndexDecisions(statisticsRegistry().registerInt(
-          "theory::arrays::aext::numIndexDecisions")),
-      d_dstrat(new AextDecisionStrategy(this)),
-      d_dstratInit(false)
+          "theory::arrays::aext::numRIntro2Propagations"))
 {
 }
 
@@ -294,19 +289,9 @@ void AextArraySolver::check(Theory::Effort level)
     checkDisequalities();
   }
 
-  // Pending care pairs: for pairs where at least one index is not a trigger
-  // term, drive the split ourselves, since the care graph cannot handle them.
-  //
-  // The propagation above stepped over these store edges on the assumption
-  // that the two indices differ, and guarded each lemma with that assumption.
-  // Nothing has committed the SAT solver to either side of it, so the split
-  // is what keeps a "sat" honest. Ask the decision engine for the literal
-  // rather than asserting the tautology (or e (not e)) as a lemma: the atom
-  // only has to be *assigned*, and a clause no one can learn from is a pure
-  // cost. See d_indexSplitLits.
-  //
-  // Re-asked on every check for every pair still undecided, deliberately.
-  // Requests are consumed, and a backtrack can unassign the literal.
+  // Pending care pairs: for pairs where at least one index is not a
+  // trigger term, send explicit split lemmas since the care graph
+  // cannot handle them.
   if (!d_state.isInConflict())
   {
     for (const auto& [t1, t2] : d_pendingCarePairs)
@@ -325,54 +310,14 @@ void AextArraySolver::check(Theory::Effort level)
       {
         continue;
       }
-      // Skip the pair if the theory that owns the index already separates
-      // the two in its model. AEXT stepped over the store edge assuming
-      // i != j, and that is what the model says, so forcing the SAT solver
-      // to decide the literal establishes nothing it does not already have.
-      //
-      // This is the same bet computeCareGraph and ArraySolver::checkPair make
-      // for shared indices, and it is sound for the same reason. The status
-      // is only a prediction at an intermediate check, and a wrong prediction
-      // there costs nothing -- the pair comes back on the next check. What
-      // matters is the last full-effort check before a model is built: if no
-      // theory adds anything there, the model is built from exactly the
-      // candidate values this status was read off, so "differ in the model"
-      // is not a guess about that model, it is a report of it.
-      //
-      // Only EQUALITY_FALSE_IN_MODEL ever fires in practice; measured over
-      // regress0/aufbv/fifo32bc06k08, of 22,000 requests 20,767 were
-      // false-in-model, 1,233 true-in-model and none entailed either way. So
-      // restricting this to the entailed statuses would skip nothing at all.
-      EqualityStatus es = d_valuation.getEqualityStatus(t1, t2);
-      if (es == EQUALITY_FALSE || es == EQUALITY_FALSE_AND_PROPAGATED
-          || es == EQUALITY_FALSE_IN_MODEL)
-      {
-        continue;
-      }
       Node split = t1.eqNode(t2);
-      Node lit;
-      auto itl = d_indexSplitLits.find(split);
-      if (itl == d_indexSplitLits.end())
+      if (d_indexSplitCache.insert(split))
       {
-        lit = d_valuation.ensureLiteral(split);
-        // No phase preference, deliberately, unlike ArraySolverDefault. One
-        // was worth 4s over 360 benchmarks while every undecided pair was
-        // being asked about, by steering the solver toward the disequality
-        // AEXT had assumed. The filter above now drops exactly those pairs,
-        // so what survives is the pairs whose model says i = j -- preferring
-        // the disequality there argues with the model. Measured with the
-        // filter in place: no preference 143.7s, prefer false 145.0s, prefer
-        // true 152.6s, all solving 303/360.
-        d_indexSplitLits.insert(split, lit);
+        Trace("arrays::aext")
+            << "Index split (non-shared): " << split << std::endl;
+        d_im.lemma(split.orNode(split.notNode()),
+                   InferenceId::ARRAYS_AEXT_INDEX_SPLIT);
       }
-      else
-      {
-        lit = (*itl).second;
-      }
-      Trace("arrays::aext")
-          << "Index split (non-shared): " << split << std::endl;
-      d_decisionRequests.push(lit);
-      ++d_numIndexDecisions;
     }
   }
 
@@ -1211,60 +1156,6 @@ void AextArraySolver::augmentModelSelects(
       }
     }
   }
-}
-
-/////////////////////////////////////////////////////////////////////////////
-// DECISION STRATEGY
-/////////////////////////////////////////////////////////////////////////////
-
-void AextArraySolver::presolve()
-{
-  if (!d_dstratInit)
-  {
-    d_dstratInit = true;
-    // user-context-independent, as in ArraySolverDefault
-    d_im.getDecisionManager()->registerStrategy(
-        DecisionManager::STRAT_ARRAYS,
-        d_dstrat.get(),
-        DecisionManager::STRAT_SCOPE_CTX_INDEPENDENT);
-  }
-}
-
-Node AextArraySolver::getNextDecisionRequest()
-{
-  while (!d_decisionRequests.empty())
-  {
-    Node n = d_decisionRequests.front();
-    d_decisionRequests.pop();
-    // The queue can hold a literal that was decided, or that the equality
-    // engine settled by propagation, after it was pushed. Handing such a
-    // literal back wastes a decision, and the decision manager treats a
-    // non-null answer as progress.
-    if (d_valuation.hasSatValue(n))
-    {
-      continue;
-    }
-    return n;
-  }
-  return Node::null();
-}
-
-AextArraySolver::AextDecisionStrategy::AextDecisionStrategy(
-    AextArraySolver* solver)
-    : DecisionStrategy(solver->d_env), d_solver(solver)
-{
-}
-
-void AextArraySolver::AextDecisionStrategy::initialize() {}
-
-Node AextArraySolver::AextDecisionStrategy::getNextDecisionRequest()
-{
-  return d_solver->getNextDecisionRequest();
-}
-
-std::string AextArraySolver::AextDecisionStrategy::identify() const
-{
-  return std::string("th_arrays_aext_dec");
 }
 
 /////////////////////////////////////////////////////////////////////////////

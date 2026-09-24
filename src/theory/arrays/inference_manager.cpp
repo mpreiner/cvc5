@@ -59,6 +59,7 @@ bool InferenceManager::isAextInference(InferenceId id)
     case InferenceId::ARRAYS_AEXT_CONGRUENCE:
     case InferenceId::ARRAYS_AEXT_ROW:
     case InferenceId::ARRAYS_AEXT_DISEQUALITY:
+    case InferenceId::ARRAYS_AEXT_INDEX_SPLIT:
     case InferenceId::ARRAYS_AEXT_CONST_ARRAY:
     case InferenceId::ARRAYS_AEXT_RINTRO2: return true;
     default: return false;
