@@ -342,18 +342,29 @@ class AextArraySolver : public ArraySolver
    * could only make the search fail to find a path, never make it return an
    * invalid one.
    *
-   * WHAT IT BUYS. Measured on 360 array benchmarks from regress0+regress1,
-   * removing the gate entirely changes no answer -- it is not load-bearing for
-   * correctness in either direction -- but costs 2.0% of total solving time,
-   * concentrated in the benchmarks where it does the most pruning:
-   * aufbv/try3_sameret_functions_fse-bfs 1.6s -> 4.3s (propagations 1,780
-   * down / 0 up -> 7,964 / 7,964) and aufbv/fifo32in06k08 0.55s -> 0.91s
-   * (0 / 0 -> 30,492 / 30,492). Blocking RowU also suppresses the RowD that
-   * would follow from the classes it would have reached, which is why the
-   * downward count moves too. So the gate earns its keep; do not delete it on
-   * the grounds that answers are unchanged without it. The assertion at the
-   * end of computeActiveArrays pins the structural fact argued above, which
-   * is the part a future change could break silently.
+   * WHAT IT BUYS. A lot, and do not delete it on the grounds that answers are
+   * unchanged without it -- they are not. Measured over 2,505 SMT-LIB
+   * benchmarks (QF_AX 551, QF_ALIA 176, QF_AUFLIA 1303, QF_AUFBV 75, QF_ABV
+   * 400 sampled) at 30s each, removing the gate entirely:
+   *
+   *   solved      2383 -> 2369
+   *   total cpu   5494.6s -> 6162.9s
+   *
+   * and on the 1,854 of those that nothing times out on, where the timing is
+   * not swamped, 1850 -> 1837 solved and 1470.3s -> 2062.2s, i.e. 40% slower.
+   * The loss is concentrated in QF_AUFLIA (1299 -> 1286) and in QF_AX
+   * storecomm instances, the worst of which goes from under a second to 22.
+   *
+   * Blocking RowU also suppresses the RowD that would have followed out of
+   * the classes it would have reached, which is why it prunes more than
+   * "upward propagation" suggests.
+   *
+   * An earlier measurement over ~360 array files from test/regress put the
+   * cost at 2%, and 20b8aa0c6 reported no answer changes at all. Both were
+   * artefacts of a set too small and too timeout-dominated to measure this;
+   * do not re-derive the conclusion from it. The assertion at the end of
+   * computeActiveArrays pins the structural fact argued above, which is the
+   * part a future change could break silently.
    *
    * HISTORY. 7288daf85d replaced this with a gate on read-presence at the
    * parent and mirrored it into findPathConditions; e52a6d4934 reverted it.
