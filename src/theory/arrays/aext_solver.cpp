@@ -402,6 +402,39 @@ void AextArraySolver::computeActiveArrays()
       ++eqi;
     }
   }
+
+#ifdef CVC5_ASSERTIONS
+  // Check the structural fact the whole gate rests on: if a store's base is
+  // excluded, that store is alone in its class. Everything the invariant on
+  // d_activeArrays argues -- that a CongR partner descends instead, that
+  // AccessStore needs an index equality Step 4 excludes, that no STORE_ALL is
+  // present -- is a case analysis over a singleton parent class, and says
+  // nothing once the class has a second member.
+  //
+  // The seed and the closure above are what establish it, and they are easy
+  // to perturb: seeding from something other than "class size > 1", or
+  // closing over anything narrower than every STORE in the class, breaks it
+  // without breaking any test, and the symptom is a wrong "sat". Assert it
+  // directly rather than trusting the reader to re-derive it.
+  for (size_t i = 0, sz = d_stores.size(); i < sz; ++i)
+  {
+    TNode store = d_stores[i];
+    if (!d_ee->hasTerm(store))
+    {
+      continue;
+    }
+    if (d_activeArrays.count(d_ee->getRepresentative(store[0])))
+    {
+      continue;
+    }
+    eq::EqClassIterator eqi(d_ee->getRepresentative(store), d_ee);
+    ++eqi;  // skip the store itself
+    Assert(eqi.isFinished())
+        << "RowU is gated off for the base of " << store
+        << ", but that store's class has a second member, " << (*eqi)
+        << ". The gate's soundness argument does not cover this.";
+  }
+#endif
 }
 
 void AextArraySolver::checkAccess(TNode select)

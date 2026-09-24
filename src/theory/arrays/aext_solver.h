@@ -320,6 +320,19 @@ class AextArraySolver : public ArraySolver
    * could only make the search fail to find a path, never make it return an
    * invalid one.
    *
+   * WHAT IT BUYS. Measured on 360 array benchmarks from regress0+regress1,
+   * removing the gate entirely changes no answer -- it is not load-bearing for
+   * correctness in either direction -- but costs 2.0% of total solving time,
+   * concentrated in the benchmarks where it does the most pruning:
+   * aufbv/try3_sameret_functions_fse-bfs 1.6s -> 4.3s (propagations 1,780
+   * down / 0 up -> 7,964 / 7,964) and aufbv/fifo32in06k08 0.55s -> 0.91s
+   * (0 / 0 -> 30,492 / 30,492). Blocking RowU also suppresses the RowD that
+   * would follow from the classes it would have reached, which is why the
+   * downward count moves too. So the gate earns its keep; do not delete it on
+   * the grounds that answers are unchanged without it. The assertion at the
+   * end of computeActiveArrays pins the structural fact argued above, which
+   * is the part a future change could break silently.
+   *
    * HISTORY. 7288daf85d replaced this with a gate on read-presence at the
    * parent and mirrored it into findPathConditions; e52a6d4934 reverted it.
    * That gate is not implied by the structure above -- absence of a read at
