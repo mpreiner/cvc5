@@ -243,8 +243,16 @@ Node ArraysInferProofCons::addPathSelectProof(
   // exact -- every literal findPathConditions pushed for these edges is
   // recorded on one of them -- so the caller's trailing conditions start
   // precisely at the new expIdx, with no guessing about where the group ended.
-  for (const PathEdge& pe : pathEdges)
+  for (size_t e = 0, nedges = pathEdges.size(); e < nedges; ++e)
   {
+    const PathEdge& pe = pathEdges[e];
+    // Only the target edge, pathEdges[0], may carry an entryEq. The chain
+    // below is built entirely from linkEq and indexDiseq; an intermediate
+    // entryEq would be an antecedent of the lemma that no step here consumes.
+    // See the corresponding comment in AextArraySolver::findPathConditions.
+    Assert(e == 0 || pe.entryEq.isNull())
+        << "path edge " << e << " of " << nedges
+        << " carries an entryEq the proof will not use: " << pe.entryEq;
     expIdx += (pe.entryEq.isNull() ? 0 : 1) + (pe.linkEq.isNull() ? 0 : 1)
               + (pe.indexDiseq.isNull() ? 0 : 1);
   }

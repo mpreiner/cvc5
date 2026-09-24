@@ -769,10 +769,23 @@ TNode AextArraySolver::findPathConditions(TNode select,
     // Each literal pushed below is also recorded on the edge, so the proof
     // converter can recover this edge's conditions without scanning the
     // flattened explanation by position.
+    //
+    // Only the target's entryEq -- the concrete array this path arrives at,
+    // equated to targetRep -- is emitted. An intermediate node's is dead
+    // weight: addPathSelectProof never mentions a representative, it threads a
+    // concrete select through the chain and builds each CONG premise as
+    // curSel[0] = store, which is syntactically this edge's linkEq, because
+    // the BFS set entryArray to exactly the array the ROW step lands on. So
+    // linkEq alone discharges every intermediate step, and an extra
+    // `entryArray = rep` only adds an antecedent the proof never uses --
+    // weakening the lemma, and duplicating a conjunct outright whenever it
+    // coincides with the next edge's linkEq. The target's is different: it is
+    // what convertCongruence's bridge walks to join two paths that entered the
+    // same class through different terms.
     if (be.store.isNull())
     {
       Node entryEq;
-      if (be.entryArray != cur && (cur != targetRep || linkEntryToTargetRep))
+      if (be.entryArray != cur && cur == targetRep && linkEntryToTargetRep)
       {
         entryEq = be.entryArray.eqNode(static_cast<Node>(cur));
         conds.push_back(entryEq);
@@ -785,7 +798,7 @@ TNode AextArraySolver::findPathConditions(TNode select,
     }
 
     Node entryEq;
-    if (be.entryArray != cur && (cur != targetRep || linkEntryToTargetRep))
+    if (be.entryArray != cur && cur == targetRep && linkEntryToTargetRep)
     {
       entryEq = be.entryArray.eqNode(static_cast<Node>(cur));
       conds.push_back(entryEq);

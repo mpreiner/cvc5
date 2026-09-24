@@ -114,6 +114,7 @@ set(regress_0_tests
   regress0/arrays/ackermann3.smt2
   regress0/arrays/aext-arith-alias-explain.smt2
   regress0/arrays/aext-care.smt2
+  regress0/arrays/aext-path-guard-shape.smt2
   regress0/arrays/aext-proof-access-store.smt2
   regress0/arrays/aext-proof-congr-chain.smt2
   regress0/arrays/aext-proof-congr.smt2
