@@ -43,7 +43,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_witnessRepPairCount(context()),
       d_congruenceLemmaCache(context()),
       d_rintro2LemmaCache(context()),
-      d_indexSplitCache(context()),
+      d_indexSplitCache(userContext()),
       d_numCongruenceLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCongruenceLemmas")),
       d_numAccessStoreLemmas(statisticsRegistry().registerInt(

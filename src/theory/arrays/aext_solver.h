@@ -256,7 +256,29 @@ class AextArraySolver : public ArraySolver
   NodeSet d_congruenceLemmaCache;
   /** Deduplication cache for RIntro2 lemmas, keyed on the conclusion. */
   NodeSet d_rintro2LemmaCache;
-  /** Deduplication cache for index split lemmas, keyed on the split. */
+  /**
+   * Deduplication cache for index split lemmas, keyed on the split.
+   *
+   * This one is on the USER context, unlike the two caches above. An index
+   * split is the tautology (or e (not e)); it is valid in every context, and
+   * it is sent with LemmaProperty::NONE, so the clause is neither REMOVABLE
+   * nor LOCAL and outlives any SAT-level backtracking. Its whole purpose is
+   * to get the atom registered with the SAT solver so the index equality gets
+   * decided, and a registered atom stays registered. Re-sending it after a
+   * pop therefore adds nothing and costs a duplicate clause.
+   *
+   * It cost a lot. On regress0/aufbv/fifo32bc06k08, with this cache on the
+   * SAT context, a 20 second budget emitted 19,452 index splits against
+   * 36,793 CaDiCaL clauses total -- roughly half the clause database was the
+   * same tautologies over and over, and CnfStep was 24,034. On the user
+   * context the same budget emits 2,287 splits, 18,764 clauses and 6,729
+   * CnfStep. ArraySolverDefault already scopes its d_RowAlreadyAdded this way.
+   *
+   * Do not "fix" this back by analogy with d_congruenceLemmaCache: that one
+   * must be SAT-context-dependent because a CongR conclusion is not a
+   * tautology and its guard can be falsified under the very context that
+   * cached it. A tautology has no guard to falsify.
+   */
   NodeSet d_indexSplitCache;
 
   //--------------------------------- per-check data structures
