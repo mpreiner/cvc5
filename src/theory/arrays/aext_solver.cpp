@@ -981,23 +981,33 @@ void AextArraySolver::checkDisequalities()
     TNode a = fact[0][0];
     TNode b = fact[0][1];
 
-    // Cap witness lemmas per canonical (rep_a, rep_b) pair. Once the cap is
-    // reached, further facts mapping to the same pair are covered by one of
-    // the already-emitted lemmas: if fact f and an earlier fact f' both have
-    // representative pair (r_a, r_b) in the current equality engine state,
-    // then f's arrays are equal to f''s arrays, so the index witnessing
-    // f' witnesses f as well. Emitting more only bloats the SAT clause
-    // database with duplicate-modulo-congruence extensionality axioms. The
-    // cap preserves SAT steering on small problems (where each fact's
-    // witness tends to be distinct) and caps blowup on larger ones (where
-    // many facts share a representative pair).
+    // One witness lemma per canonical (rep_a, rep_b) pair is enough. If fact
+    // f and an earlier fact f' both have representative pair (r_a, r_b) in
+    // the current equality engine state, then f's arrays are equal to f''s,
+    // so the index witnessing f' witnesses f as well by congruence. Further
+    // lemmas for the same pair are extensionality axioms that differ only
+    // modulo congruence, and they cost clause database.
+    //
+    // This was 30 until it was measured. At 30 the cap never fired at all:
+    // over 2,505 SMT-LIB benchmarks (QF_AX, QF_ALIA, QF_AUFLIA, QF_AUFBV,
+    // QF_ABV) the highest count any representative pair ever reached was 24,
+    // so the code was unreachable and the "caps blowup on larger problems"
+    // half of its rationale had never been exercised. Dropping to 1 -- what
+    // the coverage argument above actually licenses -- is a wash or better
+    // everywhere: no answer changes anywhere, 2383 -> 2384 solved overall,
+    // and on QF_ALIA, the only logic where many facts share a pair, 109 ->
+    // 113 solved. Restricted to the benchmarks the cap can even affect, it is
+    // faster: -24.1s over the 18 such benchmarks in QF_ALIA, -1.9s over the 6
+    // in QF_AX+QF_AUFLIA. (Aggregate timings over the full sets are not worth
+    // quoting here; run-to-run noise on this harness is ~100s over 1,800
+    // benchmarks, far larger than the effect.)
     //
     // Note the count is context-dependent, so it only suppresses witnesses
     // while we remain in the state that makes the argument above valid.
     // Note also that a suppressed fact is deliberately NOT recorded in
     // d_witnessDiseqs: we may have to emit its witness after backtracking,
     // when the covering lemma no longer applies.
-    constexpr uint32_t kWitnessCapPerRepPair = 30;
+    constexpr uint32_t kWitnessCapPerRepPair = 1;
     TNode repA = d_ee->getRepresentative(a);
     TNode repB = d_ee->getRepresentative(b);
     Node repPair = repA < repB ? repA.eqNode(repB) : repB.eqNode(repA);
