@@ -196,6 +196,16 @@ class AextArraySolver : public ArraySolver
   void buildParentMap();
   /** Compute active array representatives for RowU gating. */
   void computeActiveArrays();
+  /**
+   * The undecided index pairs the propagation state depends on: for every
+   * entry (X, k) -> r, the pair of r's index and the index of each store an
+   * open edge out of X goes through -- every STORE in X (RowD), and every
+   * parent of X if the RowU gate is open at X -- that the equality engine
+   * neither equates nor separates. These are exactly the pairs a walk from
+   * scratch would cross undecided. Refreshes d_parentStores and
+   * d_activeArrays first, so it can be called outside check().
+   */
+  std::vector<std::pair<TNode, TNode>> pendingIndexPairs();
   //--------------------------------- end propagation
 
   //--------------------------------- checking incrementality
@@ -286,6 +296,13 @@ class AextArraySolver : public ArraySolver
    * does not touch, still describe a state on the current context path.
    */
   context::CDO<uint64_t> d_stateGen;
+  /** State of the last check that sent index splits on the current path. */
+  context::CDO<CheckState> d_lastSplitState;
+  /**
+   * Send a split lemma for every pair of pendingIndexPairs that the care
+   * graph cannot handle, unless that was already done in state.
+   */
+  void sendIndexSplits(const CheckState& state);
 
   /** All registered SELECT terms (context-dependent) */
   context::CDList<TNode> d_selects;
@@ -399,8 +416,6 @@ class AextArraySolver : public ArraySolver
    *   the two. The stop rule in propagateFrom relies on
    *   this: a read that stops at a taken slot leaves the rest of the walk to
    *   the occupant.
-   * - CARE. Every edge an entry crossed has its index pair in
-   *   d_pendingCarePairs, unless the pair is decided.
    *
    * What each change since the last check does to them, and how applyDelta
    * restores them:
@@ -422,9 +437,10 @@ class AextArraySolver : public ArraySolver
    *   make a lemma or a split unnecessary, which is filtered where it is used.
    * - A pop can undo any of the above, and is handled by rebuilding.
    *
-   * d_pendingCarePairs is only ever appended to between rebuilds, so it may
-   * hold pairs for edges no read crosses any more. That is harmless: a pair
-   * only leads to a split lemma, which is a tautology, or to a care pair.
+   * The index pairs whose decision the propagation depends on are not
+   * stored: pendingIndexPairs derives them from the slots when they are
+   * needed. An accumulated list keeps the pairs of edges that no read crosses
+   * any more for as long as it is kept, and those inflate the care graph.
    */
   /**
    * Generation of the check that built the structures in this block; see
@@ -452,10 +468,6 @@ class AextArraySolver : public ArraySolver
   size_t d_numSelectsDone = 0;
   /** How many of d_stores the propagation state accounts for. */
   size_t d_numStoresDone = 0;
-  /** How many of d_pendingCarePairs the index split loop has looked at. */
-  size_t d_numSplitsDone = 0;
-  std::vector<std::pair<TNode, TNode>> d_pendingCarePairs;
-  std::unordered_set<Node> d_pendingCarePairCache;
   std::unordered_set<Node> d_checkAccessCache;
   std::unordered_map<TNode, std::unordered_map<TNode, PropagatedRead>>
       d_arrayModels;

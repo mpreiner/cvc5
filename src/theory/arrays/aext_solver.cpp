@@ -39,6 +39,7 @@ AextArraySolver::AextArraySolver(Env& env,
           env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
       d_incrementalJoins(context()),
       d_stateGen(context(), 0),
+      d_lastSplitState(context()),
       d_selects(context()),
       d_stores(context()),
       d_arrayDisequalities(context()),
@@ -247,13 +248,16 @@ void AextArraySolver::check(Theory::Effort level)
   // that, equal counts mean nothing was asserted or registered since, and the
   // structures below, which computeCareGraph() reads, describe this state.
   //
-  // A full effort check still has work to do in that state if index splits
-  // were left for it.
+  // A full effort check still has index splits to send in that state if the
+  // check that ran on it was at standard effort.
   CheckState state{
       d_ee->getNumAssertedEqualities(), d_selects.size(), d_stores.size()};
-  if (d_stateGen.get() == d_builtGen && d_builtState == state
-      && !(fullEffort && d_numSplitsDone < d_pendingCarePairs.size()))
+  if (d_stateGen.get() == d_builtGen && d_builtState == state)
   {
+    if (fullEffort)
+    {
+      sendIndexSplits(state);
+    }
     ++d_numCheckSkips;
     return;
   }
@@ -275,13 +279,10 @@ void AextArraySolver::check(Theory::Effort level)
   if (!incremental)
   {
     ++d_numCheckRebuilds;
-    d_pendingCarePairs.clear();
-    d_pendingCarePairCache.clear();
     d_checkAccessCache.clear();
     d_arrayModels.clear();
     d_numSelectsDone = 0;
     d_numStoresDone = 0;
-    d_numSplitsDone = 0;
   }
 
   // RIntro2 theory propagation. This runs before the two maps below are built,
@@ -343,9 +344,77 @@ void AextArraySolver::check(Theory::Effort level)
   // Handle disequalities (DisEq rule)
   checkDisequalities();
 
-  // Pending care pairs: for pairs where at least one index is not a
-  // trigger term, send explicit split lemmas since the care graph
-  // cannot handle them.
+  if (fullEffort)
+  {
+    sendIndexSplits(state);
+  }
+
+  // Only a run that got all the way here without a conflict licenses a skip:
+  // an aborted one may have left work undone.
+  if (!d_state.isInConflict())
+  {
+    d_stateGen = d_builtGen;
+    if (incremental && options().arrays.arraysAextCheckIncremental)
+    {
+      checkIncrementalState();
+    }
+  }
+
+  Trace("arrays::aext") << "AextArraySolver::check() done" << std::endl;
+}
+
+std::vector<std::pair<TNode, TNode>> AextArraySolver::pendingIndexPairs()
+{
+  // The maps are only current as of the last check that ran.
+  buildParentMap();
+  computeActiveArrays();
+  std::vector<std::pair<TNode, TNode>> pairs;
+  std::unordered_set<std::pair<TNode, TNode>, PairHashFunction<TNode, TNode>>
+      seen;
+  auto consider = [&](TNode index, TNode storeIndex) {
+    if (d_ee->areEqual(index, storeIndex)
+        || d_ee->areDisequal(index, storeIndex, false))
+    {
+      return;
+    }
+    if (seen.emplace(index, storeIndex).second)
+    {
+      pairs.emplace_back(index, storeIndex);
+    }
+  };
+  for (const auto& [arrayRep, model] : d_arrayModels)
+  {
+    for (const auto& [indexRep, read] : model)
+    {
+      for (eq::EqClassIterator eqi(arrayRep, d_ee); !eqi.isFinished(); ++eqi)
+      {
+        TNode n = *eqi;
+        if (n.getKind() == Kind::STORE)
+        {
+          consider(read.index, n[1]);
+        }
+      }
+      if (d_activeArrays.count(arrayRep))
+      {
+        auto pit = d_parentStores.find(arrayRep);
+        if (pit != d_parentStores.end())
+        {
+          for (TNode store : pit->second)
+          {
+            consider(read.index, store[1]);
+          }
+        }
+      }
+    }
+  }
+  return pairs;
+}
+
+void AextArraySolver::sendIndexSplits(const CheckState& state)
+{
+  // Index splits: for undecided pairs where at least one index is not a
+  // trigger term, send an explicit split lemma, since the care graph cannot
+  // handle them.
   //
   // Only at full effort. A split exists to get an index pair decided before
   // the SAT solver declares a model, so nothing is lost by waiting for one,
@@ -357,24 +426,12 @@ void AextArraySolver::check(Theory::Effort level)
   // SMT-LIB benchmarks at 30s, waiting solves 21 more (2376 -> 2397),
   // mostly QF_ABV (366 -> 378) and QF_ALIA (117 -> 125), with no losses
   // beyond noise.
-  //
-  // A pair only needs looking at once between rebuilds. After that it has
-  // either been split, and d_indexSplitCache keeps it from being split again,
-  // or it was decided, or both its terms were trigger terms. Without a pop --
-  // which forces a rebuild -- a decided pair stays decided and a trigger term
-  // stays one.
-  for (size_t sz = d_pendingCarePairs.size(); fullEffort && d_numSplitsDone < sz;
-       ++d_numSplitsDone)
+  if (d_lastSplitState.get() == state)
   {
-    if (d_state.isInConflict())
-    {
-      break;
-    }
-    const auto& [t1, t2] = d_pendingCarePairs[d_numSplitsDone];
-    if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
-    {
-      continue;
-    }
+    return;
+  }
+  for (const auto& [t1, t2] : pendingIndexPairs())
+  {
     // Trigger-term pairs are handled via the care graph.
     if (d_ee->isTriggerTerm(t1, THEORY_ARRAYS)
         && d_ee->isTriggerTerm(t2, THEORY_ARRAYS))
@@ -390,19 +447,7 @@ void AextArraySolver::check(Theory::Effort level)
                  InferenceId::ARRAYS_AEXT_INDEX_SPLIT);
     }
   }
-
-  // Only a run that got all the way here without a conflict licenses a skip:
-  // an aborted one may have left work undone.
-  if (!d_state.isInConflict())
-  {
-    d_stateGen = d_builtGen;
-    if (incremental && options().arrays.arraysAextCheckIncremental)
-    {
-      checkIncrementalState();
-    }
-  }
-
-  Trace("arrays::aext") << "AextArraySolver::check() done" << std::endl;
+  d_lastSplitState = state;
 }
 
 void AextArraySolver::applyDelta(const std::unordered_set<TNode>& wasActive)
@@ -606,12 +651,8 @@ void AextArraySolver::checkIncrementalState()
   // Rebuild into fresh structures, with lemmas replaced by recording what the
   // rebuild would have had to justify, and put the incremental ones back.
   auto models = std::move(d_arrayModels);
-  auto carePairs = std::move(d_pendingCarePairs);
-  auto carePairCache = std::move(d_pendingCarePairCache);
   auto accessCache = std::move(d_checkAccessCache);
   d_arrayModels.clear();
-  d_pendingCarePairs.clear();
-  d_pendingCarePairCache.clear();
   d_checkAccessCache.clear();
   d_shadowObligations.clear();
   d_inShadowRebuild = true;
@@ -621,10 +662,8 @@ void AextArraySolver::checkIncrementalState()
   }
   d_inShadowRebuild = false;
   std::swap(models, d_arrayModels);
-  std::swap(carePairs, d_pendingCarePairs);
-  std::swap(carePairCache, d_pendingCarePairCache);
   std::swap(accessCache, d_checkAccessCache);
-  // From here on, `models` and `carePairs` are the rebuilt ones.
+  // From here on, `models` is the rebuilt one.
 
   // Two terms are joined if they are equal, or if a lemma equating them was
   // sent on this path whose guard nothing has falsified since: until the SAT
@@ -661,7 +700,8 @@ void AextArraySolver::checkIncrementalState()
   }
 
   // Everything the rebuild derived, the incremental state reaches too: the
-  // same slots, the same terms joined, and the same undecided index pairs.
+  // same slots and the same terms joined. (The undecided index pairs are
+  // derived from the slots, so equal slots give equal pairs.)
   for (const auto& [t1, t2] : d_shadowObligations)
   {
     AlwaysAssert(find(t1) == find(t2))
@@ -692,25 +732,6 @@ void AextArraySolver::checkIncrementalState()
           << "incremental AEXT check: " << inc << " and " << read.select
           << " share a slot at " << arrayRep << " but are not joined";
     }
-  }
-  std::unordered_set<Node> incPairs;
-  for (const auto& [t1, t2] : d_pendingCarePairs)
-  {
-    Node r1 = d_ee->getRepresentative(t1);
-    Node r2 = d_ee->getRepresentative(t2);
-    incPairs.insert(r1 < r2 ? r1.eqNode(r2) : r2.eqNode(r1));
-  }
-  for (const auto& [t1, t2] : carePairs)
-  {
-    if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
-    {
-      continue;
-    }
-    Node r1 = d_ee->getRepresentative(t1);
-    Node r2 = d_ee->getRepresentative(t2);
-    AlwaysAssert(incPairs.count(r1 < r2 ? r1.eqNode(r2) : r2.eqNode(r1)))
-        << "incremental AEXT check: the rebuild requests " << t1 << " vs "
-        << t2 << ", which the incremental state does not";
   }
   Trace("arrays::aext") << "incremental state agrees with a rebuild ("
                         << slotCount(models) << " slots)" << std::endl;
@@ -1059,15 +1080,6 @@ void AextArraySolver::propagateFrom(TNode select,
         if (n.getKind() == Kind::STORE
             && d_ee->getRepresentative(n[1]) != indexRep)
         {
-          if (!d_ee->areDisequal(index, n[1], false))
-          {
-            Node split = index.eqNode(n[1]);
-            if (!rewrite(split).isConst()
-                && d_pendingCarePairCache.insert(split).second)
-            {
-              d_pendingCarePairs.emplace_back(index, n[1]);
-            }
-          }
           Trace("arrays::aext") << "  RowD push: " << n[0] << std::endl;
           visit.push_back(n[0]);
           ++d_numPropagationsDown;
@@ -1087,15 +1099,6 @@ void AextArraySolver::propagateFrom(TNode select,
           TNode storeIndexRep = d_ee->getRepresentative(store[1]);
           if (indexRep != storeIndexRep)
           {
-            if (!d_ee->areDisequal(index, store[1], false))
-            {
-              Node split = index.eqNode(store[1]);
-              if (!rewrite(split).isConst()
-                  && d_pendingCarePairCache.insert(split).second)
-              {
-                d_pendingCarePairs.emplace_back(index, store[1]);
-              }
-            }
             Trace("arrays::aext") << "  RowU push: " << store << std::endl;
             visit.push_back(store);
             ++d_numPropagationsUp;
@@ -1506,9 +1509,10 @@ void AextArraySolver::augmentModelSelects(
   //
   // It cannot, for any edge that matters. checkAccess walks the same graph
   // under the same condition (`rep(t[1]) != indexRep` is `!areEqual` on
-  // representatives) and requests a split for every edge it takes, via
-  // d_pendingCarePairs; by the time a model is built, the SAT solver has
-  // decided each of them and the answer is in the equality engine. Three
+  // representatives), and every full effort check requests a split for every
+  // undecided edge out of where it recorded a read (see pendingIndexPairs);
+  // by the time a model is built, the SAT solver has decided each of them
+  // and the answer is in the equality engine. Three
   // places where the two walks differ, and why none of them opens a gap:
   //
   //  - checkAccess stops at an array where a read with the same index
@@ -1524,9 +1528,8 @@ void AextArraySolver::augmentModelSelects(
   //    never read. Descending back out of such a class reaches rep(s[0]),
   //    which the walk has already visited. The gated region contributes
   //    nothing to the model.
-  //  - checkAccess skips a pair whose split rewrites to a constant. Those are
-  //    two distinct constants, which the equality engine already knows to be
-  //    disequal.
+  //  - pendingIndexPairs skips a pair the equality engine already separates,
+  //    two distinct constants included. That is a decided pair.
   //
   // Do not "harden" this into areDisequal: that is strictly stronger than the
   // condition checkAccess propagates under, and dropping an edge here does not
@@ -1646,12 +1649,8 @@ void AextArraySolver::computeCareGraph(AddCarePairFn addCarePair)
     }
   }
 
-  for (const auto& [t1, t2] : d_pendingCarePairs)
+  for (const auto& [t1, t2] : pendingIndexPairs())
   {
-    if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
-    {
-      continue;
-    }
     if (!d_ee->isTriggerTerm(t1, THEORY_ARRAYS)
         || !d_ee->isTriggerTerm(t2, THEORY_ARRAYS))
     {
