@@ -449,13 +449,17 @@ void AextArraySolver::checkAccess(TNode select)
   {
     return;
   }
+  propagateFrom(select, select[0]);
+}
 
+void AextArraySolver::propagateFrom(TNode select, TNode start)
+{
   TNode index = select[1];
   TNode indexRep = d_ee->getRepresentative(index);
   NodeManager* nm = nodeManager();
 
   std::vector<TNode> visit;
-  visit.push_back(select[0]);
+  visit.push_back(start);
 
   while (!visit.empty() && !d_state.isInConflict())
   {

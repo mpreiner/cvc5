@@ -117,9 +117,19 @@ class AextArraySolver : public ArraySolver
    */
   void check(Theory::Effort level);
   /**
-   * Propagate a single select through store chains (RowD/RowU).
+   * Propagate a single select through store chains (RowD/RowU), starting at
+   * its own array. Does nothing for a select already propagated since
+   * d_checkAccessCache was last cleared.
    */
   void checkAccess(TNode select);
+  /**
+   * Propagate select from the array start through store chains (RowD/RowU),
+   * recording it in d_arrayModels at every array representative it reaches
+   * and checking CongR, AccessStore and AccessConstArray there. The walk stops
+   * at a representative where a read with the same index representative is
+   * already recorded, after checking CongR against it.
+   */
+  void propagateFrom(TNode select, TNode start);
   /**
    * Find a path from a select's starting array to a target array
    * representative through the store graph (RowD/RowU edges), and
