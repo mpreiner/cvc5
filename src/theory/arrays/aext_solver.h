@@ -188,16 +188,19 @@ class AextArraySolver : public ArraySolver
    * WHY COUNTS IDENTIFY CONTENTS. They do not, in general: registering a read
    * at one decision level, popping, and registering a different read leaves
    * d_selects the same size with different elements. They do along a single
-   * context path, which is all this is ever compared over, because the stamp
-   * it is compared against lives in a context::CDO (see d_lastCheckState).
-   * d_selects and d_stores are CDLists, whose only mutations are push_back and
-   * a restore that truncates from the end, and the equality engine truncates
-   * its asserted-equality trail to getNumAssertedEqualities() on backtrack. So
-   * all three only grow as the path deepens, and a pop restores an earlier
-   * prefix exactly: two points on one path with equal counts hold the same
-   * elements and the same equivalence classes. In the example above the CDO
-   * has reverted to the shallower level's smaller size by the time the second
-   * read is registered, so the fingerprints differ and the check runs.
+   * context path, which is all this is ever compared over: the stored
+   * fingerprint is only consulted while d_stateGen says the current state
+   * extends the one it was taken in. d_selects and d_stores are CDLists, whose
+   * only mutations are push_back and a restore that truncates from the end,
+   * and the equality engine truncates its asserted-equality trail to
+   * getNumAssertedEqualities() on backtrack. So all three only grow as the
+   * path deepens, and a pop restores an earlier prefix exactly: two points on
+   * one path with equal counts hold the same elements and the same
+   * equivalence classes. In the example above, if the first read was
+   * registered above the level of the fingerprinted check, the pop takes the
+   * count back down and the second read raises it past the fingerprint again;
+   * if it was registered below, the pop discards the fingerprinted check
+   * itself and d_stateGen no longer matches.
    */
   struct CheckState
   {
@@ -211,11 +214,18 @@ class AextArraySolver : public ArraySolver
     }
   };
   /**
-   * State at the entry of the last completed check(). The default value is
-   * reached only before anything is registered or asserted, where check() has
-   * nothing to do anyway, so it needs no separate "unset" marker.
+   * Generation of the last check() that ran to completion, as seen from the
+   * current context. Each completed check stores the value it drew into
+   * d_builtGen here.
+   *
+   * d_stateGen.get() == d_builtGen holds exactly when there has been no pop
+   * below the context level that check completed at: a pop reverts this CDO
+   * to the generation of an earlier check (or to 0), and since generations are
+   * never reused, pushing again cannot make it match. It is therefore the test
+   * for whether the plain structures in the per-check block below, which a pop
+   * does not touch, still describe a state on the current context path.
    */
-  context::CDO<CheckState> d_lastCheckState;
+  context::CDO<uint64_t> d_stateGen;
 
   /** All registered SELECT terms (context-dependent) */
   context::CDList<TNode> d_selects;
@@ -293,13 +303,21 @@ class AextArraySolver : public ArraySolver
 
   //--------------------------------- per-check data structures
   /**
-   * State the structures in this block were last built at. Unlike
-   * d_lastCheckState this is NOT context-dependent, because the structures it
-   * describes are not either: after a pop they still hold whatever the deepest
-   * check computed. Skipping a check requires both stamps to match, so that
-   * what computeCareGraph() reads really does belong to the current state.
+   * Generation of the check that built the structures in this block; see
+   * d_stateGen. A check draws it on entry, before touching anything, so a
+   * check that a conflict aborts halfway leaves a generation that d_stateGen
+   * never received, and the next check rebuilds.
    */
-  CheckState d_perCheckState;
+  uint64_t d_builtGen = 0;
+  /** The source of fresh generations. */
+  uint64_t d_genCounter = 0;
+  /**
+   * Fingerprint on entry to the check that built the structures in this
+   * block. The default value is reached only before anything is registered or
+   * asserted, where check() has nothing to do anyway, so it needs no separate
+   * "unset" marker.
+   */
+  CheckState d_builtState;
   std::vector<std::pair<TNode, TNode>> d_pendingCarePairs;
   std::unordered_set<Node> d_pendingCarePairCache;
   std::unordered_set<Node> d_checkAccessCache;

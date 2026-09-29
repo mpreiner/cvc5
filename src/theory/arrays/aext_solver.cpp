@@ -35,7 +35,7 @@ AextArraySolver::AextArraySolver(Env& env,
                                  context::CDO<bool>& sharedTerms)
     : ArraySolver(
           env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
-      d_lastCheckState(context()),
+      d_stateGen(context(), 0),
       d_selects(context()),
       d_stores(context()),
       d_arrayDisequalities(context()),
@@ -218,17 +218,15 @@ void AextArraySolver::check(Theory::Effort level)
   // facts, and stamping the post-merge state would claim a complete check at a
   // state we never actually ran on.
   //
-  // Both stamps have to match. d_lastCheckState is context-dependent, so it
-  // alone establishes that no fact was asserted and no term registered since a
-  // complete check *on the current context path* -- a plain counter would
-  // wrongly match a sibling branch that asserted a different fact and landed on
-  // the same count. d_perCheckState is not context-dependent, so it alone
-  // establishes that the structures below still describe this state -- after a
-  // pop they hold what the deeper check left behind, which computeCareGraph()
-  // must not read.
+  // The generation match establishes that the current state extends the one
+  // the last completed check ran on -- no pop has discarded it -- so its plain
+  // fingerprint is comparable at all: without it, a sibling branch that
+  // asserted a different fact and landed on the same count would match. Given
+  // that, equal counts mean nothing was asserted or registered since, and the
+  // structures below, which computeCareGraph() reads, describe this state.
   CheckState state{
       d_ee->getNumAssertedEqualities(), d_selects.size(), d_stores.size()};
-  if (d_lastCheckState.get() == state && d_perCheckState == state)
+  if (d_stateGen.get() == d_builtGen && d_builtState == state)
   {
     ++d_numCheckSkips;
     return;
@@ -246,7 +244,8 @@ void AextArraySolver::check(Theory::Effort level)
   d_pendingCarePairCache.clear();
   d_checkAccessCache.clear();
   d_arrayModels.clear();
-  d_perCheckState = state;
+  d_builtGen = ++d_genCounter;
+  d_builtState = state;
 
   // RIntro2 theory propagation. This runs before the two maps below are built,
   // because it asserts internal facts: the equalities it derives are between
@@ -260,8 +259,8 @@ void AextArraySolver::check(Theory::Effort level)
   propagateRIntro2();
   // Both maps below iterate equivalence classes, and EqClassIterator requires
   // a consistent equality engine, so bail out before them if RIntro2 derived a
-  // conflict. Nothing is stamped into d_lastCheckState on this path, so the
-  // next check() redoes the work.
+  // conflict. Nothing is stamped into d_stateGen on this path, so the next
+  // check() redoes the work.
   if (d_state.isInConflict())
   {
     return;
@@ -325,7 +324,7 @@ void AextArraySolver::check(Theory::Effort level)
   // an aborted one may have left work undone.
   if (!d_state.isInConflict())
   {
-    d_lastCheckState = state;
+    d_stateGen = d_builtGen;
   }
 
   Trace("arrays::aext") << "AextArraySolver::check() done" << std::endl;
