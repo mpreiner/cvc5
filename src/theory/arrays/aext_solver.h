@@ -207,6 +207,11 @@ class AextArraySolver : public ArraySolver
    */
   void recordJoin(TNode t1, TNode t2, TNode guard);
   /**
+   * Whether some literal of guard (a conjunction, or a single literal) is
+   * false in the current equality engine state.
+   */
+  bool isGuardFalsified(TNode guard) const;
+  /**
    * Under --arrays-aext-check-incremental, after every incremental check:
    * rebuild the propagation state from scratch, without sending anything, and
    * fail hard unless the incremental state agrees with it -- it records the
@@ -329,6 +334,16 @@ class AextArraySolver : public ArraySolver
    * constructed with cacheLemmas=false.)
    */
   NodeSet d_congruenceLemmaCache;
+  /**
+   * For each unordered pair of reads a CongR lemma was derived for on the
+   * current path, keyed on their equality, the guard of the latest one. See
+   * checkCongruence for why a pair with a live guard need not be compared
+   * again. This does not undo the reasoning above for keying
+   * d_congruenceLemmaCache on the whole lemma: the pair is compared again,
+   * and the new guard sent, as soon as the SAT solver falsifies a literal of
+   * the old one.
+   */
+  context::CDHashMap<Node, Node> d_congruenceGuards;
   /** Deduplication cache for RIntro2 lemmas, keyed on the conclusion. */
   NodeSet d_rintro2LemmaCache;
   /**

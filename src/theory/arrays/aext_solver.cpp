@@ -45,6 +45,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_witnessDiseqs(context()),
       d_witnessRepPairCount(context()),
       d_congruenceLemmaCache(context()),
+      d_congruenceGuards(context()),
       d_rintro2LemmaCache(context()),
       d_indexSplitCache(userContext()),
       d_numCongruenceLemmas(statisticsRegistry().registerInt(
@@ -573,6 +574,33 @@ void AextArraySolver::recordJoin(TNode t1, TNode t2, TNode guard)
   }
 }
 
+bool AextArraySolver::isGuardFalsified(TNode guard) const
+{
+  auto falsified = [&](TNode lit) {
+    bool pol = lit.getKind() != Kind::NOT;
+    TNode atom = pol ? lit : lit[0];
+    if (atom.getKind() != Kind::EQUAL || !d_ee->hasTerm(atom[0])
+        || !d_ee->hasTerm(atom[1]))
+    {
+      return false;
+    }
+    return pol ? d_ee->areDisequal(atom[0], atom[1], false)
+               : d_ee->areEqual(atom[0], atom[1]);
+  };
+  if (guard.getKind() == Kind::AND)
+  {
+    for (TNode lit : guard)
+    {
+      if (falsified(lit))
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+  return !guard.isConst() && falsified(guard);
+}
+
 void AextArraySolver::checkIncrementalState()
 {
   // Rebuild into fresh structures, with lemmas replaced by recording what the
@@ -619,33 +647,9 @@ void AextArraySolver::checkIncrementalState()
     parent[x] = root;
     return root;
   };
-  auto falsified = [&](TNode lit) {
-    bool pol = lit.getKind() != Kind::NOT;
-    TNode atom = pol ? lit : lit[0];
-    if (atom.getKind() != Kind::EQUAL || !d_ee->hasTerm(atom[0])
-        || !d_ee->hasTerm(atom[1]))
-    {
-      return false;
-    }
-    return pol ? d_ee->areDisequal(atom[0], atom[1], false)
-               : d_ee->areEqual(atom[0], atom[1]);
-  };
   for (const Node& join : d_incrementalJoins)
   {
-    TNode guard = join[2];
-    bool live = true;
-    if (guard.getKind() == Kind::AND)
-    {
-      for (TNode lit : guard)
-      {
-        live = live && !falsified(lit);
-      }
-    }
-    else if (!guard.isConst())
-    {
-      live = !falsified(guard);
-    }
-    if (live)
+    if (!isGuardFalsified(join[2]))
     {
       Node r1 = find(join[0]);
       Node r2 = find(join[1]);
@@ -846,6 +850,23 @@ void AextArraySolver::checkCongruence(const PropagatedRead& arriving,
     d_shadowObligations.emplace_back(arriving.select, existing.select);
     return;
   }
+  // The two may have met before on this path, and the lemma sent then still
+  // forces them equal as long as nothing has falsified its guard: the SAT
+  // solver cannot avoid the conclusion without assigning a guard literal
+  // false, and the only way to do that without a conflict is to merge an
+  // index class into one a path edge's store index is in -- an index merge,
+  // after which both reads are walked again and meet afresh. Meeting again
+  // through a different path would otherwise send a second lemma with a
+  // different guard each time, which resuming reads at merged classes, and
+  // rebuilding after every pop, both do constantly.
+  Node pairKey = arriving.select < existing.select
+                     ? arriving.select.eqNode(existing.select)
+                     : existing.select.eqNode(arriving.select);
+  auto pit = d_congruenceGuards.find(pairKey);
+  if (pit != d_congruenceGuards.end() && !isGuardFalsified((*pit).second))
+  {
+    return;
+  }
   Node conc = arriving.select.eqNode(existing.select);
   std::vector<Node> expVec;
   std::vector<std::vector<PathEdge>> paths(2);
@@ -866,6 +887,7 @@ void AextArraySolver::checkCongruence(const PropagatedRead& arriving,
   Node exp = nodeManager()->mkAnd(expVec);
   Trace("arrays::aext") << "CongR: " << exp << " => " << conc << std::endl;
   recordJoin(arriving.select, existing.select, exp);
+  d_congruenceGuards[pairKey] = exp;
   // Keyed on the whole lemma: the same conclusion may be justified by
   // several distinct path condition sets, and each one has to be sent.
   if (d_congruenceLemmaCache.insert(exp.impNode(conc)))
