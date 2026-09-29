@@ -22,7 +22,7 @@ name   = "Arrays Theory"
   long       = "arrays-aext-check-incremental"
   type       = "bool"
   default    = "false"
-  help       = "debugging aid for --arrays-solver=aext: after every incremental check, rebuild its propagation state from scratch and abort unless the two agree (slow; also skews the AEXT propagation statistics)"
+  help       = "debugging aid for --arrays-solver=aext: after every check, rebuild its incrementally maintained propagation state from scratch and abort unless the two agree (slow; also skews the AEXT propagation statistics)"
 
 [[option]]
   name       = "arraysOptimizeLinear"

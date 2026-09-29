@@ -38,7 +38,7 @@ AextArraySolver::AextArraySolver(Env& env,
     : ArraySolver(
           env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
       d_incrementalJoins(context()),
-      d_stateGen(context(), 0),
+      d_lastCheckState(context()),
       d_lastSplitState(context()),
       d_selects(context()),
       d_stores(context()),
@@ -49,6 +49,8 @@ AextArraySolver::AextArraySolver(Env& env,
       d_congruenceGuards(context()),
       d_rintro2LemmaCache(context()),
       d_indexSplitCache(userContext()),
+      d_undoMark(context(), 0),
+      d_mergeQueue(context()),
       d_numCongruenceLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCongruenceLemmas")),
       d_numAccessStoreLemmas(statisticsRegistry().registerInt(
@@ -61,8 +63,10 @@ AextArraySolver::AextArraySolver(Env& env,
           "theory::arrays::aext::numCheckCalls")),
       d_numCheckSkips(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCheckSkips")),
-      d_numCheckRebuilds(statisticsRegistry().registerInt(
-          "theory::arrays::aext::numCheckRebuilds")),
+      d_numCheckRestores(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numCheckRestores")),
+      d_numUndoRecords(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numUndoRecords")),
       d_numDeltaResumes(statisticsRegistry().registerInt(
           "theory::arrays::aext::numDeltaResumes")),
       d_numDeltaRedoReads(statisticsRegistry().registerInt(
@@ -229,6 +233,11 @@ void AextArraySolver::check(Theory::Effort level)
   }
   bool fullEffort = Theory::fullEffort(level);
 
+  // Take the propagation state back to what the last check that completed on
+  // the current context path left. Whatever was recorded after that belongs
+  // to checks a pop has since undone, or to one a conflict cut short.
+  undoToMark();
+
   // Skip the check if nothing it reads has changed since the last one that ran
   // to completion. The propagation below is a function of the equality engine
   // and of d_selects / d_stores alone, so it would rebuild the same
@@ -241,18 +250,15 @@ void AextArraySolver::check(Theory::Effort level)
   // facts, and stamping the post-merge state would claim a complete check at a
   // state we never actually ran on.
   //
-  // The generation match establishes that the current state extends the one
-  // the last completed check ran on -- no pop has discarded it -- so its plain
-  // fingerprint is comparable at all: without it, a sibling branch that
-  // asserted a different fact and landed on the same count would match. Given
-  // that, equal counts mean nothing was asserted or registered since, and the
-  // structures below, which computeCareGraph() reads, describe this state.
+  // undoToMark has just taken the structures below, which computeCareGraph()
+  // reads, back to the result of the check that fingerprint belongs to, so on
+  // a match they describe this state.
   //
   // A full effort check still has index splits to send in that state if the
   // check that ran on it was at standard effort.
   CheckState state{
       d_ee->getNumAssertedEqualities(), d_selects.size(), d_stores.size()};
-  if (d_stateGen.get() == d_builtGen && d_builtState == state)
+  if (d_lastCheckState.get() == state)
   {
     if (fullEffort)
     {
@@ -266,24 +272,9 @@ void AextArraySolver::check(Theory::Effort level)
   Trace("arrays::aext") << "AextArraySolver::check() with " << d_selects.size()
                         << " selects and " << d_stores.size() << " stores"
                         << std::endl;
-
-  // Whether the propagation state still describes a state on the current
-  // context path. If so, only what changed since has to be applied to it (see
-  // applyDelta); otherwise a pop has undone some of what it records, and it is
-  // rebuilt from scratch.
-  bool incremental = d_stateGen.get() == d_builtGen;
-  // From here until the stamp at the end the structures describe no state at
-  // all, so draw the generation before touching them.
-  d_builtGen = ++d_genCounter;
-  d_builtState = state;
-  if (!incremental)
-  {
-    ++d_numCheckRebuilds;
-    d_checkAccessCache.clear();
-    d_arrayModels.clear();
-    d_numSelectsDone = 0;
-    d_numStoresDone = 0;
-  }
+  d_undoCounters.push_back(
+      {d_numSelectsDone, d_numStoresDone, d_numMergesDone});
+  d_undoLog.push_back({UndoRecord::COUNTERS, Node(), Node(), Node()});
 
   // RIntro2 theory propagation. This runs before the two maps below are built,
   // because it asserts internal facts: the equalities it derives are between
@@ -298,8 +289,8 @@ void AextArraySolver::check(Theory::Effort level)
   propagateRIntro2();
   // Both maps below iterate equivalence classes, and EqClassIterator requires
   // a consistent equality engine, so bail out before them if RIntro2 derived a
-  // conflict. Nothing is stamped into d_stateGen on this path, so the next
-  // check() redoes the work.
+  // conflict. Nothing is stamped on this path, so the next check() undoes
+  // what this one recorded and redoes it.
   if (d_state.isInConflict())
   {
     return;
@@ -308,34 +299,10 @@ void AextArraySolver::check(Theory::Effort level)
   // Build the parent store map for RowU propagation.
   buildParentMap();
 
-  // Compute active arrays for RowU gating, keeping the previous set: a
-  // representative that has just become active has RowU edges that its
-  // recorded reads have not been pushed along yet.
-  std::unordered_set<TNode> wasActive;
-  wasActive.swap(d_activeArrays);
+  // Compute active arrays for RowU gating.
   computeActiveArrays();
 
-  if (incremental)
-  {
-    applyDelta(wasActive);
-  }
-  else
-  {
-    // Everything merged so far is visible to the walk below.
-    d_mergeQueue.clear();
-    d_numStoresDone = d_stores.size();
-    // Propagate all registered selects through store chains.
-    size_t sz = d_selects.size();
-    for (size_t i = 0; i < sz; ++i)
-    {
-      if (d_state.isInConflict())
-      {
-        return;
-      }
-      checkAccess(d_selects[i]);
-    }
-    d_numSelectsDone = sz;
-  }
+  applyDelta();
   if (d_state.isInConflict())
   {
     return;
@@ -349,12 +316,13 @@ void AextArraySolver::check(Theory::Effort level)
     sendIndexSplits(state);
   }
 
-  // Only a run that got all the way here without a conflict licenses a skip:
-  // an aborted one may have left work undone.
+  // Only a run that got all the way here without a conflict licenses a skip,
+  // or keeps what it recorded: an aborted one may have left work undone.
   if (!d_state.isInConflict())
   {
-    d_stateGen = d_builtGen;
-    if (incremental && options().arrays.arraysAextCheckIncremental)
+    d_undoMark = d_undoLog.size();
+    d_lastCheckState = state;
+    if (options().arrays.arraysAextCheckIncremental)
     {
       checkIncrementalState();
     }
@@ -363,9 +331,66 @@ void AextArraySolver::check(Theory::Effort level)
   Trace("arrays::aext") << "AextArraySolver::check() done" << std::endl;
 }
 
+void AextArraySolver::addSlot(TNode arrayRep, TNode indexRep, TNode select)
+{
+  d_arrayModels[arrayRep][indexRep] = {select, select[1]};
+  if (!d_inShadowRebuild)
+  {
+    d_undoLog.push_back(
+        {UndoRecord::SLOT_ADDED, arrayRep, indexRep, Node()});
+  }
+}
+
+void AextArraySolver::removeSlot(TNode arrayRep, TNode indexRep)
+{
+  auto it = d_arrayModels.find(arrayRep);
+  Assert(it != d_arrayModels.end());
+  auto jt = it->second.find(indexRep);
+  Assert(jt != it->second.end());
+  if (!d_inShadowRebuild)
+  {
+    d_undoLog.push_back(
+        {UndoRecord::SLOT_REMOVED, arrayRep, indexRep, jt->second.select});
+  }
+  it->second.erase(jt);
+  if (it->second.empty())
+  {
+    d_arrayModels.erase(it);
+  }
+}
+
+bool AextArraySolver::markWalked(TNode select)
+{
+  if (!d_checkAccessCache.insert(select).second)
+  {
+    return false;
+  }
+  if (!d_inShadowRebuild)
+  {
+    d_undoLog.push_back(
+        {UndoRecord::WALKED_ADDED, select, Node(), Node()});
+  }
+  return true;
+}
+
+bool AextArraySolver::unmarkWalked(TNode select)
+{
+  if (d_checkAccessCache.erase(select) == 0)
+  {
+    return false;
+  }
+  if (!d_inShadowRebuild)
+  {
+    d_undoLog.push_back(
+        {UndoRecord::WALKED_REMOVED, select, Node(), Node()});
+  }
+  return true;
+}
+
 std::vector<std::pair<TNode, TNode>> AextArraySolver::pendingIndexPairs()
 {
-  // The maps are only current as of the last check that ran.
+  // The maps are only current as of the last check that ran, and a skipped
+  // check may follow one that a pop has since undone.
   buildParentMap();
   computeActiveArrays();
   std::vector<std::pair<TNode, TNode>> pairs;
@@ -450,22 +475,71 @@ void AextArraySolver::sendIndexSplits(const CheckState& state)
   d_lastSplitState = state;
 }
 
-void AextArraySolver::applyDelta(const std::unordered_set<TNode>& wasActive)
+void AextArraySolver::undoToMark()
 {
-  std::vector<Node> losers;
-  losers.swap(d_mergeQueue);
+  size_t mark = d_undoMark.get();
+  Assert(mark <= d_undoLog.size());
+  if (mark < d_undoLog.size())
+  {
+    ++d_numCheckRestores;
+    d_numUndoRecords += d_undoLog.size() - mark;
+  }
+  while (d_undoLog.size() > mark)
+  {
+    const UndoRecord& u = d_undoLog.back();
+    switch (u.d_kind)
+    {
+      case UndoRecord::SLOT_ADDED:
+      {
+        auto it = d_arrayModels.find(u.d_a);
+        Assert(it != d_arrayModels.end() && it->second.count(u.d_b));
+        it->second.erase(u.d_b);
+        if (it->second.empty())
+        {
+          d_arrayModels.erase(it);
+        }
+        break;
+      }
+      case UndoRecord::SLOT_REMOVED:
+        Assert(!d_arrayModels.count(u.d_a)
+               || !d_arrayModels[u.d_a].count(u.d_b));
+        d_arrayModels[u.d_a][u.d_b] = {u.d_c, u.d_c[1]};
+        break;
+      case UndoRecord::WALKED_ADDED: d_checkAccessCache.erase(u.d_a); break;
+      case UndoRecord::WALKED_REMOVED: d_checkAccessCache.insert(u.d_a); break;
+      case UndoRecord::GATE_OPENED: d_gateOpened.erase(u.d_a); break;
+      case UndoRecord::COUNTERS:
+      {
+        const UndoCounters& c = d_undoCounters.back();
+        d_numSelectsDone = c.d_selects;
+        d_numStoresDone = c.d_stores;
+        d_numMergesDone = c.d_merges;
+        d_undoCounters.pop_back();
+        break;
+      }
+    }
+    d_undoLog.pop_back();
+  }
+}
 
-  // Every class a queued merge touched, by its current representative. A
-  // merge queued at a level that has been popped since is stale, and
-  // harmless: its loser is a representative again or no longer a term, and
-  // re-deriving what an unchanged class holds changes nothing.
+void AextArraySolver::applyDelta()
+{
+  // The losers of the merges since the last completed check on this path.
+  std::vector<Node> losers;
+  for (size_t sz = d_mergeQueue.size(); d_numMergesDone < sz;
+       ++d_numMergesDone)
+  {
+    losers.push_back(d_mergeQueue[d_numMergesDone]);
+  }
+
+  // Every class a queued merge touched, by its current representative. The
+  // queue only holds merges made on the current path, so their terms are
+  // still in the equality engine.
   std::unordered_set<TNode> merged;
   for (const Node& b : losers)
   {
-    if (d_ee->hasTerm(b))
-    {
-      merged.insert(d_ee->getRepresentative(b));
-    }
+    Assert(d_ee->hasTerm(b));
+    merged.insert(d_ee->getRepresentative(b));
   }
 
   // Index merges. They are the one change that can invalidate what is
@@ -484,7 +558,7 @@ void AextArraySolver::applyDelta(const std::unordered_set<TNode>& wasActive)
     {
       TNode sel = d_selects[i];
       if (d_ee->hasTerm(sel) && merged.count(d_ee->getRepresentative(sel[1]))
-          && d_checkAccessCache.erase(sel))
+          && unmarkWalked(sel))
       {
         redo.push_back(sel);
       }
@@ -492,21 +566,20 @@ void AextArraySolver::applyDelta(const std::unordered_set<TNode>& wasActive)
   }
   if (!redo.empty())
   {
-    for (auto it = d_arrayModels.begin(); it != d_arrayModels.end();)
+    std::vector<std::pair<TNode, TNode>> drop;
+    for (const auto& [arrayRep, model] : d_arrayModels)
     {
-      auto& model = it->second;
-      for (auto jt = model.begin(); jt != model.end();)
+      for (const auto& [indexRep, read] : model)
       {
-        if (merged.count(d_ee->getRepresentative(jt->second.index)))
+        if (merged.count(d_ee->getRepresentative(read.index)))
         {
-          jt = model.erase(jt);
-        }
-        else
-        {
-          ++jt;
+          drop.emplace_back(arrayRep, indexRep);
         }
       }
-      it = model.empty() ? d_arrayModels.erase(it) : std::next(it);
+    }
+    for (const auto& [arrayRep, indexRep] : drop)
+    {
+      removeSlot(arrayRep, indexRep);
     }
   }
   d_numDeltaRedoReads += redo.size();
@@ -519,7 +592,7 @@ void AextArraySolver::applyDelta(const std::unordered_set<TNode>& wasActive)
   std::unordered_set<TNode> dirty;
   for (const Node& b : losers)
   {
-    if (!d_ee->hasTerm(b) || !b.getType().isArray())
+    if (!b.getType().isArray())
     {
       continue;
     }
@@ -530,16 +603,27 @@ void AextArraySolver::applyDelta(const std::unordered_set<TNode>& wasActive)
     {
       continue;
     }
-    std::unordered_map<TNode, PropagatedRead> moved = std::move(it->second);
-    d_arrayModels.erase(it);
-    auto& into = d_arrayModels[r];
-    for (const auto& [k, read] : moved)
+    std::vector<PropagatedRead> moved;
+    std::vector<TNode> keys;
+    for (const auto& [k, read] : it->second)
     {
-      auto [jt, inserted] = into.emplace(k, read);
-      if (!inserted)
+      keys.push_back(k);
+      moved.push_back(read);
+    }
+    for (size_t i = 0, n = keys.size(); i < n; ++i)
+    {
+      removeSlot(b, keys[i]);
+      auto rit = d_arrayModels.find(r);
+      if (rit != d_arrayModels.end())
       {
-        checkCongruence(read, jt->second, r);
+        auto jt = rit->second.find(keys[i]);
+        if (jt != rit->second.end())
+        {
+          checkCongruence(moved[i], jt->second, r);
+          continue;
+        }
       }
+      addSlot(r, keys[i], moved[i].select);
     }
   }
 
@@ -556,11 +640,12 @@ void AextArraySolver::applyDelta(const std::unordered_set<TNode>& wasActive)
   }
 
   // The RowU gate only opens along a context path. A representative it has
-  // just opened at has new RowU edges.
+  // opened at since the last check has new RowU edges.
   for (TNode a : d_activeArrays)
   {
-    if (!wasActive.count(a))
+    if (d_gateOpened.insert(a).second)
     {
+      d_undoLog.push_back({UndoRecord::GATE_OPENED, a, Node(), Node()});
       dirty.insert(a);
     }
   }
@@ -847,7 +932,7 @@ void AextArraySolver::checkAccess(TNode select)
 {
   Assert(select.getKind() == Kind::SELECT);
 
-  if (!d_checkAccessCache.insert(select).second)
+  if (!markWalked(select))
   {
     return;
   }
@@ -878,8 +963,8 @@ void AextArraySolver::checkCongruence(const PropagatedRead& arriving,
   // index class into one a path edge's store index is in -- an index merge,
   // after which both reads are walked again and meet afresh. Meeting again
   // through a different path would otherwise send a second lemma with a
-  // different guard each time, which resuming reads at merged classes, and
-  // rebuilding after every pop, both do constantly.
+  // different guard each time, which resuming reads at merged classes does
+  // constantly.
   Node pairKey = arriving.select < existing.select
                      ? arriving.select.eqNode(existing.select)
                      : existing.select.eqNode(arriving.select);
@@ -959,7 +1044,7 @@ void AextArraySolver::propagateFrom(TNode select,
         checkCongruence({select, index}, it->second, arrayRep);
         continue;
       }
-      model[indexRep] = {select, index};
+      addSlot(arrayRep, indexRep, select);
 
       // Read-read care pairs between trigger-term indices are emitted from
       // computeCareGraph() in a single pass over d_arrayModels, to avoid
@@ -1222,10 +1307,11 @@ TNode AextArraySolver::findPathConditions(TNode select,
   // not apply the d_activeArrays gate, and the equality engine does not move
   // during the select loop -- so every conflict checkAccess detects has a path
   // here. What earlier checks recorded is kept valid for this by the handling
-  // of index merges in applyDelta (VALIDITY on the propagation state). Should that ever stop holding, do not walk a tree that has no entry
-  // for targetRep: the walk below would dereference an end iterator, which
-  // Assert does not prevent in a production build. Report the failure instead
-  // and let the caller drop the lemma.
+  // of index merges in applyDelta (VALIDITY on the propagation state). Should
+  // that ever stop holding, do not walk a tree that has no entry for
+  // targetRep: the walk below would dereference an end iterator, which Assert
+  // does not prevent in a production build. Report the failure instead and
+  // let the caller drop the lemma.
   Assert(found) << "findPathConditions: no path from " << startArray
                 << " to rep " << targetRep;
   if (!found)

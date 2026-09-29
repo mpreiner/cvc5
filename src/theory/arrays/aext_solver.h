@@ -116,20 +116,18 @@ class AextArraySolver : public ArraySolver
    * and checks for conflicts (CongR/AccessStore). Then handles disequalities
    * (DisEq).
    *
-   * The propagation state persists between checks. A check rebuilds it from
-   * scratch only when a pop has undone part of what it records; otherwise it
-   * applies what changed since the last check (see applyDelta).
+   * The propagation state persists between checks. A check first undoes
+   * whatever a pop has discarded (see undoToMark), then applies what changed
+   * since (see applyDelta).
    */
   void check(Theory::Effort level);
   /**
-   * Bring the propagation state up to date with everything registered and
-   * merged since the last completed check, which must not have been undone by
-   * a pop. See the invariants on the propagation state below for what each
+   * Bring the propagation state, as the last completed check on the current
+   * context path left it, up to date with everything registered and merged
+   * since. See the invariants on the propagation state below for what each
    * kind of change requires.
-   *
-   * @param wasActive d_activeArrays as of the last completed check
    */
-  void applyDelta(const std::unordered_set<TNode>& wasActive);
+  void applyDelta();
   /**
    * Propagate a single select through store chains (RowD/RowU), starting at
    * its own array. Does nothing for a select already propagated since
@@ -222,7 +220,7 @@ class AextArraySolver : public ArraySolver
    */
   bool isGuardFalsified(TNode guard) const;
   /**
-   * Under --arrays-aext-check-incremental, after every incremental check:
+   * Under --arrays-aext-check-incremental, after every check:
    * rebuild the propagation state from scratch, without sending anything, and
    * fail hard unless the incremental state agrees with it -- it records the
    * same (array, index) slots, every pair of terms the rebuild would have to
@@ -258,19 +256,17 @@ class AextArraySolver : public ArraySolver
    * WHY COUNTS IDENTIFY CONTENTS. They do not, in general: registering a read
    * at one decision level, popping, and registering a different read leaves
    * d_selects the same size with different elements. They do along a single
-   * context path, which is all this is ever compared over: the stored
-   * fingerprint is only consulted while d_stateGen says the current state
-   * extends the one it was taken in. d_selects and d_stores are CDLists, whose
+   * context path, which is all this is ever compared over, because the
+   * stamp it is compared against lives in a context::CDO (see
+   * d_lastCheckState). d_selects and d_stores are CDLists, whose
    * only mutations are push_back and a restore that truncates from the end,
    * and the equality engine truncates its asserted-equality trail to
    * getNumAssertedEqualities() on backtrack. So all three only grow as the
    * path deepens, and a pop restores an earlier prefix exactly: two points on
    * one path with equal counts hold the same elements and the same
-   * equivalence classes. In the example above, if the first read was
-   * registered above the level of the fingerprinted check, the pop takes the
-   * count back down and the second read raises it past the fingerprint again;
-   * if it was registered below, the pop discards the fingerprinted check
-   * itself and d_stateGen no longer matches.
+   * equivalence classes. In the example above the CDO has reverted to the
+   * shallower level's smaller size by the time the second read is
+   * registered, so the fingerprints differ and the check runs.
    */
   struct CheckState
   {
@@ -284,18 +280,12 @@ class AextArraySolver : public ArraySolver
     }
   };
   /**
-   * Generation of the last check() that ran to completion, as seen from the
-   * current context. Each completed check stores the value it drew into
-   * d_builtGen here.
-   *
-   * d_stateGen.get() == d_builtGen holds exactly when there has been no pop
-   * below the context level that check completed at: a pop reverts this CDO
-   * to the generation of an earlier check (or to 0), and since generations are
-   * never reused, pushing again cannot make it match. It is therefore the test
-   * for whether the plain structures in the per-check block below, which a pop
-   * does not touch, still describe a state on the current context path.
+   * State at the entry of the last completed check() on the current context
+   * path. The default value is reached only before anything is registered or
+   * asserted, where check() has nothing to do anyway, so it needs no separate
+   * "unset" marker.
    */
-  context::CDO<uint64_t> d_stateGen;
+  context::CDO<CheckState> d_lastCheckState;
   /** State of the last check that sent index splits on the current path. */
   context::CDO<CheckState> d_lastSplitState;
   /**
@@ -390,12 +380,15 @@ class AextArraySolver : public ArraySolver
 
   //--------------------------------- propagation state
   /**
-   * The structures in this block are plain, not context-dependent, and
-   * persist from one check to the next. check() either rebuilds them from
-   * scratch or, when d_stateGen says no pop has undone the state they
-   * describe, has applyDelta bring them up to date. Between checks they are
-   * only read by computeCareGraph(), which runs after a check at the same
-   * state.
+   * The structures in this block persist from one check to the next. They
+   * are plain rather than context-dependent, and a pop is handled by an undo
+   * log instead: every change to them goes through a helper that records how
+   * to reverse it in d_undoLog, and d_undoMark, which is context-dependent,
+   * holds the log's length when the last check on the current path
+   * completed. On entry, check() reverses everything past the mark, which
+   * takes the structures back to that check's result, and applyDelta then
+   * brings them up to date. Between checks they are only read by
+   * computeCareGraph(), which runs after a check at the same state.
    *
    * Edges. A RowD edge leads from an array class X through a STORE s in X to
    * the class of s[0]; a RowU edge leads from the class of s[0] through s to
@@ -435,39 +428,77 @@ class AextArraySolver : public ArraySolver
    *   all of their entries and walk them again.
    * - Element merges and new disequalities invalidate nothing; at most they
    *   make a lemma or a split unnecessary, which is filtered where it is used.
-   * - A pop can undo any of the above, and is handled by rebuilding.
+   * - A pop can undo any of the above, and is handled by the undo log.
    *
    * The index pairs whose decision the propagation depends on are not
    * stored: pendingIndexPairs derives them from the slots when they are
-   * needed. An accumulated list keeps the pairs of edges that no read crosses
-   * any more for as long as it is kept, and those inflate the care graph.
+   * needed. An accumulated list would keep the pairs of edges that no read
+   * crosses any more for as long as the path lasts: on QF_ALIA
+   * qlock.induction.11 that made the care graph twelve times as slow to
+   * compute and tripled the combination splits.
    */
+  /** One reversible change to the propagation state. */
+  struct UndoRecord
+  {
+    enum Kind : uint8_t
+    {
+      /** slot (d_a, d_b) of d_arrayModels was added */
+      SLOT_ADDED,
+      /** slot (d_a, d_b), holding read d_c, was removed */
+      SLOT_REMOVED,
+      /** read d_a was added to d_checkAccessCache */
+      WALKED_ADDED,
+      /** read d_a was removed from d_checkAccessCache */
+      WALKED_REMOVED,
+      /** representative d_a was added to d_gateOpened */
+      GATE_OPENED,
+      /** a check started; the counters it found are d_undoCounters.back() */
+      COUNTERS,
+    };
+    Kind d_kind;
+    /**
+     * The terms involved, as Nodes: after a pop the log may be the only thing
+     * keeping them alive until the next check undoes the record.
+     */
+    Node d_a, d_b, d_c;
+  };
+  /** The progress counters below, as a check found them on entry. */
+  struct UndoCounters
+  {
+    size_t d_selects, d_stores, d_merges;
+  };
+  /** Add read select as the entry of slot (arrayRep, indexRep). */
+  void addSlot(TNode arrayRep, TNode indexRep, TNode select);
+  /** Remove the entry of slot (arrayRep, indexRep), which must exist. */
+  void removeSlot(TNode arrayRep, TNode indexRep);
+  /** Add select to d_checkAccessCache; false if it was there already. */
+  bool markWalked(TNode select);
+  /** Remove select from d_checkAccessCache; false if it was not there. */
+  bool unmarkWalked(TNode select);
+  /** Reverse d_undoLog down to d_undoMark. */
+  void undoToMark();
+  /** The changes made to the propagation state, oldest first. */
+  std::vector<UndoRecord> d_undoLog;
+  /** Counter snapshots of the COUNTERS records in d_undoLog, in order. */
+  std::vector<UndoCounters> d_undoCounters;
+  /** Length of d_undoLog when the last check on this path completed. */
+  context::CDO<size_t> d_undoMark;
   /**
-   * Generation of the check that built the structures in this block; see
-   * d_stateGen. A check draws it on entry, before touching anything, so a
-   * check that a conflict aborts halfway leaves a generation that d_stateGen
-   * never received, and the next check rebuilds.
+   * The losing representative of every equality engine merge, of any type.
+   * The first d_numMergesDone have been applied to the propagation state.
    */
-  uint64_t d_builtGen = 0;
-  /** The source of fresh generations. */
-  uint64_t d_genCounter = 0;
-  /**
-   * Fingerprint on entry to the check that built the structures in this
-   * block. The default value is reached only before anything is registered or
-   * asserted, where check() has nothing to do anyway, so it needs no separate
-   * "unset" marker.
-   */
-  CheckState d_builtState;
-  /**
-   * The losing representative of every equality engine merge since the last
-   * completed check, of any type. Nodes rather than TNodes: after a partial
-   * pop this may name terms that the equality engine has since dropped.
-   */
-  std::vector<Node> d_mergeQueue;
+  context::CDList<Node> d_mergeQueue;
+  /** How many of d_mergeQueue the propagation state accounts for. */
+  size_t d_numMergesDone = 0;
   /** How many of d_selects the propagation state has walked. */
   size_t d_numSelectsDone = 0;
   /** How many of d_stores the propagation state accounts for. */
   size_t d_numStoresDone = 0;
+  /**
+   * The representatives the RowU gate has been open at so far on this path,
+   * as far as applyDelta has taken account of it.
+   */
+  std::unordered_set<Node> d_gateOpened;
   std::unordered_set<Node> d_checkAccessCache;
   std::unordered_map<TNode, std::unordered_map<TNode, PropagatedRead>>
       d_arrayModels;
@@ -560,7 +591,10 @@ class AextArraySolver : public ArraySolver
   IntStat d_numConstArrayLemmas;
   IntStat d_numCheckCalls;
   IntStat d_numCheckSkips;
-  IntStat d_numCheckRebuilds;
+  /** Checks that undid work a pop or a conflict had discarded. */
+  IntStat d_numCheckRestores;
+  /** Undo records reversed by those checks. */
+  IntStat d_numUndoRecords;
   /** Reads resumed at a class whose contents changed (see applyDelta). */
   IntStat d_numDeltaResumes;
   /** Reads walked again because their index class merged. */
