@@ -87,6 +87,7 @@ class AextArraySolver : public ArraySolver
   void preRegisterStore(TNode node) override;
   void preRegisterStoreAll(TNode node) override;
   void eqNotifyMerge(TNode a, TNode b) override;
+  void eqNotifyMergeNonArray(TNode a, TNode b) override;
   void postCheck(Theory::Effort level) override;
   void notifyArrayDisequality(TNode a, TNode b, TNode fact) override;
   void computeRelevantTerms(std::set<Node>& termSet) override;
@@ -114,8 +115,21 @@ class AextArraySolver : public ArraySolver
    * For each registered select, propagates it through store chains (RowD/RowU)
    * and checks for conflicts (CongR/AccessStore). Then handles disequalities
    * (DisEq).
+   *
+   * The propagation state persists between checks. A check rebuilds it from
+   * scratch only when a pop has undone part of what it records; otherwise it
+   * applies what changed since the last check (see applyDelta).
    */
   void check(Theory::Effort level);
+  /**
+   * Bring the propagation state up to date with everything registered and
+   * merged since the last completed check, which must not have been undone by
+   * a pop. See the invariants on the propagation state below for what each
+   * kind of change requires.
+   *
+   * @param wasActive d_activeArrays as of the last completed check
+   */
+  void applyDelta(const std::unordered_set<TNode>& wasActive);
   /**
    * Propagate a single select through store chains (RowD/RowU), starting at
    * its own array. Does nothing for a select already propagated since
@@ -128,8 +142,20 @@ class AextArraySolver : public ArraySolver
    * and checking CongR, AccessStore and AccessConstArray there. The walk stops
    * at a representative where a read with the same index representative is
    * already recorded, after checking CongR against it.
+   *
+   * @param recordedAtStart whether select is already the read recorded at
+   * start for its index class. It is then not recorded again, and everything
+   * else is re-checked there: this resumes a read whose class changed.
    */
-  void propagateFrom(TNode select, TNode start);
+  void propagateFrom(TNode select, TNode start, bool recordedAtStart = false);
+  /**
+   * CongR: arriving has reached arrayRep, where existing is recorded for the
+   * same index class. Unless the two are already equal, send the lemma that
+   * they are, guarded by the paths that brought both there.
+   */
+  void checkCongruence(const PropagatedRead& arriving,
+                       const PropagatedRead& existing,
+                       TNode arrayRep);
   /**
    * Find a path from a select's starting array to a target array
    * representative through the store graph (RowD/RowU edges), and
@@ -171,6 +197,35 @@ class AextArraySolver : public ArraySolver
   /** Compute active array representatives for RowU gating. */
   void computeActiveArrays();
   //--------------------------------- end propagation
+
+  //--------------------------------- checking incrementality
+  /**
+   * Under --arrays-aext-check-incremental, record that a lemma guard => t1 =
+   * t2 was derived on the current path. checkIncrementalState counts on
+   * these to tell whether two terms the incremental state never compared
+   * directly are nonetheless forced equal.
+   */
+  void recordJoin(TNode t1, TNode t2, TNode guard);
+  /**
+   * Under --arrays-aext-check-incremental, after every incremental check:
+   * rebuild the propagation state from scratch, without sending anything, and
+   * fail hard unless the incremental state agrees with it -- it records the
+   * same (array, index) slots, every pair of terms the rebuild would have to
+   * equate (two reads meeting at a slot, a read and a store value or constant
+   * array default it matches) is joined by equality or by a recorded lemma
+   * whose guard nothing has falsified, and every undecided index pair the
+   * rebuild requests is pending. Occupants may legitimately differ: which of
+   * several reads reaching a slot records itself there depends on the order
+   * they arrive in.
+   */
+  void checkIncrementalState();
+  /** The lemmas recorded by recordJoin, as (SEXPR t1 t2 guard). */
+  context::CDList<Node> d_incrementalJoins;
+  /** Whether checkIncrementalState is rebuilding; suppresses all lemmas. */
+  bool d_inShadowRebuild = false;
+  /** Pairs of terms the rebuild of checkIncrementalState would equate. */
+  std::vector<std::pair<Node, Node>> d_shadowObligations;
+  //--------------------------------- end checking incrementality
 
   /**
    * Lightweight merge for model construction support.
@@ -301,7 +356,61 @@ class AextArraySolver : public ArraySolver
    */
   NodeSet d_indexSplitCache;
 
-  //--------------------------------- per-check data structures
+  //--------------------------------- propagation state
+  /**
+   * The structures in this block are plain, not context-dependent, and
+   * persist from one check to the next. check() either rebuilds them from
+   * scratch or, when d_stateGen says no pop has undone the state they
+   * describe, has applyDelta bring them up to date. Between checks they are
+   * only read by computeCareGraph(), which runs after a check at the same
+   * state.
+   *
+   * Edges. A RowD edge leads from an array class X through a STORE s in X to
+   * the class of s[0]; a RowU edge leads from the class of s[0] through s to
+   * the class of s, and is only taken out of classes in d_activeArrays. Either
+   * edge is open for a read whose index representative differs from that of
+   * s[1].
+   *
+   * After every completed check:
+   *
+   * - VALIDITY. Every entry (X, k) -> r in d_arrayModels is keyed on current
+   *   representatives, k is that of r's index, and r has a path of open edges
+   *   from its own array to X. findPathConditions re-derives such a path for
+   *   every lemma, so a break here trips its assertion.
+   * - CLOSURE. Every entry at X has been pushed along every edge currently
+   *   open out of X, and checked for AccessStore and AccessConstArray against
+   *   the STOREs and STORE_ALLs X currently holds. A push that lands on a
+   *   slot taken by another read counts once CongR has been checked between
+   *   the two. The stop rule in propagateFrom relies on
+   *   this: a read that stops at a taken slot leaves the rest of the walk to
+   *   the occupant.
+   * - CARE. Every edge an entry crossed has its index pair in
+   *   d_pendingCarePairs, unless the pair is decided.
+   *
+   * What each change since the last check does to them, and how applyDelta
+   * restores them:
+   *
+   * - A new read has no entries yet: walk it from its own array.
+   * - A new store is a new edge out of two classes and a new AccessStore
+   *   target in one: resume every read recorded at either.
+   * - An array merge puts two classes' slots, stores, constant arrays and
+   *   parents together: move the loser's slots to the winner, check CongR
+   *   wherever both had one, and resume every read recorded at the winner.
+   * - The RowU gate opening at a class opens RowU edges out of it: resume
+   *   every read recorded there. The gate only ever opens along a path, since
+   *   it grows with class sizes.
+   * - An index merge is the only change that can break VALIDITY: an edge a
+   *   read crossed closes when its store index joins the read's index class.
+   *   It affects exactly the reads whose index is in the merged class, so drop
+   *   all of their entries and walk them again.
+   * - Element merges and new disequalities invalidate nothing; at most they
+   *   make a lemma or a split unnecessary, which is filtered where it is used.
+   * - A pop can undo any of the above, and is handled by rebuilding.
+   *
+   * d_pendingCarePairs is only ever appended to between rebuilds, so it may
+   * hold pairs for edges no read crosses any more. That is harmless: a pair
+   * only leads to a split lemma, which is a tautology, or to a care pair.
+   */
   /**
    * Generation of the check that built the structures in this block; see
    * d_stateGen. A check draws it on entry, before touching anything, so a
@@ -318,6 +427,18 @@ class AextArraySolver : public ArraySolver
    * "unset" marker.
    */
   CheckState d_builtState;
+  /**
+   * The losing representative of every equality engine merge since the last
+   * completed check, of any type. Nodes rather than TNodes: after a partial
+   * pop this may name terms that the equality engine has since dropped.
+   */
+  std::vector<Node> d_mergeQueue;
+  /** How many of d_selects the propagation state has walked. */
+  size_t d_numSelectsDone = 0;
+  /** How many of d_stores the propagation state accounts for. */
+  size_t d_numStoresDone = 0;
+  /** How many of d_pendingCarePairs the index split loop has looked at. */
+  size_t d_numSplitsDone = 0;
   std::vector<std::pair<TNode, TNode>> d_pendingCarePairs;
   std::unordered_set<Node> d_pendingCarePairCache;
   std::unordered_set<Node> d_checkAccessCache;
@@ -403,7 +524,7 @@ class AextArraySolver : public ArraySolver
    * condition over any read-presence test.
    */
   std::unordered_set<TNode> d_activeArrays;
-  //--------------------------------- end per-check data structures
+  //--------------------------------- end propagation state
 
   //--------------------------------- statistics
   IntStat d_numCongruenceLemmas;
@@ -412,6 +533,11 @@ class AextArraySolver : public ArraySolver
   IntStat d_numConstArrayLemmas;
   IntStat d_numCheckCalls;
   IntStat d_numCheckSkips;
+  IntStat d_numCheckRebuilds;
+  /** Reads resumed at a class whose contents changed (see applyDelta). */
+  IntStat d_numDeltaResumes;
+  /** Reads walked again because their index class merged. */
+  IntStat d_numDeltaRedoReads;
   IntStat d_numPropagationsDown;
   IntStat d_numPropagationsUp;
   IntStat d_numRIntro2Propagations;

@@ -17,6 +17,14 @@ name   = "Arrays Theory"
   help = "use the AEXT calculus-based array solver (Brummayer/Biere); note this solver ignores the other arrays options (--arrays-weak-equiv, --arrays-eager-lemmas, --arrays-eager-index, --arrays-prop, --arrays-optimize-linear), which only affect the default solver"
 
 [[option]]
+  name       = "arraysAextCheckIncremental"
+  category   = "expert"
+  long       = "arrays-aext-check-incremental"
+  type       = "bool"
+  default    = "false"
+  help       = "debugging aid for --arrays-solver=aext: after every incremental check, rebuild its propagation state from scratch and abort unless the two agree (slow; also skews the AEXT propagation statistics)"
+
+[[option]]
   name       = "arraysOptimizeLinear"
   category   = "expert"
   long       = "arrays-optimize-linear"

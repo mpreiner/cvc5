@@ -225,6 +225,10 @@ class TheoryArrays : public Theory
       {
         d_arrays.d_internal->eqNotifyMerge(t1, t2);
       }
+      else
+      {
+        d_arrays.d_internal->eqNotifyMergeNonArray(t1, t2);
+      }
     }
     void eqNotifyDisequal(CVC5_UNUSED TNode t1,
                           CVC5_UNUSED TNode t2,

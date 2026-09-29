@@ -13,9 +13,11 @@
 #include "theory/arrays/aext_solver.h"
 
 #include <deque>
+#include <functional>
 
 #include "expr/array_store_all.h"
 #include "expr/node_manager.h"
+#include "options/arrays_options.h"
 #include "smt/logic_exception.h"
 #include "theory/arrays/skolem_cache.h"
 #include "theory/theory_model.h"
@@ -35,6 +37,7 @@ AextArraySolver::AextArraySolver(Env& env,
                                  context::CDO<bool>& sharedTerms)
     : ArraySolver(
           env, state, im, valuation, mayEqualEE, defValues, sharedTerms),
+      d_incrementalJoins(context()),
       d_stateGen(context(), 0),
       d_selects(context()),
       d_stores(context()),
@@ -56,6 +59,12 @@ AextArraySolver::AextArraySolver(Env& env,
           "theory::arrays::aext::numCheckCalls")),
       d_numCheckSkips(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCheckSkips")),
+      d_numCheckRebuilds(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numCheckRebuilds")),
+      d_numDeltaResumes(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numDeltaResumes")),
+      d_numDeltaRedoReads(statisticsRegistry().registerInt(
+          "theory::arrays::aext::numDeltaRedoReads")),
       d_numPropagationsDown(statisticsRegistry().registerInt(
           "theory::arrays::aext::numPropagationsDown")),
       d_numPropagationsUp(statisticsRegistry().registerInt(
@@ -122,7 +131,13 @@ void AextArraySolver::preRegisterStoreAll(TNode /*node*/)
 
 void AextArraySolver::eqNotifyMerge(TNode a, TNode b)
 {
+  d_mergeQueue.push_back(b);
   mergeArraysModelOnly(a, b);
+}
+
+void AextArraySolver::eqNotifyMergeNonArray(TNode /*a*/, TNode b)
+{
+  d_mergeQueue.push_back(b);
 }
 
 void AextArraySolver::mergeArraysModelOnly(TNode a, TNode b)
@@ -237,15 +252,26 @@ void AextArraySolver::check(Theory::Effort level)
                         << " selects and " << d_stores.size() << " stores"
                         << std::endl;
 
-  // Clear per-check data structures. Everything here is rebuilt from
-  // scratch below, and is only read during this check() and the
-  // computeCareGraph() call that follows it.
-  d_pendingCarePairs.clear();
-  d_pendingCarePairCache.clear();
-  d_checkAccessCache.clear();
-  d_arrayModels.clear();
+  // Whether the propagation state still describes a state on the current
+  // context path. If so, only what changed since has to be applied to it (see
+  // applyDelta); otherwise a pop has undone some of what it records, and it is
+  // rebuilt from scratch.
+  bool incremental = d_stateGen.get() == d_builtGen;
+  // From here until the stamp at the end the structures describe no state at
+  // all, so draw the generation before touching them.
   d_builtGen = ++d_genCounter;
   d_builtState = state;
+  if (!incremental)
+  {
+    ++d_numCheckRebuilds;
+    d_pendingCarePairs.clear();
+    d_pendingCarePairCache.clear();
+    d_checkAccessCache.clear();
+    d_arrayModels.clear();
+    d_numSelectsDone = 0;
+    d_numStoresDone = 0;
+    d_numSplitsDone = 0;
+  }
 
   // RIntro2 theory propagation. This runs before the two maps below are built,
   // because it asserts internal facts: the equalities it derives are between
@@ -255,7 +281,8 @@ void AextArraySolver::check(Theory::Effort level)
   // a missed d_parentStores lookup silently disables RowU -- the direction that
   // costs satisfiability completeness. (Measured before the reorder:
   // regress0/aufbv/fifo32bc06k08 had 15 of 108 checks where RIntro2 moved the
-  // equality engine.)
+  // equality engine.) For the same reason it runs before applyDelta: the
+  // merges it causes are queued like any other, and handled with them.
   propagateRIntro2();
   // Both maps below iterate equivalence classes, and EqClassIterator requires
   // a consistent equality engine, so bail out before them if RIntro2 derived a
@@ -269,54 +296,76 @@ void AextArraySolver::check(Theory::Effort level)
   // Build the parent store map for RowU propagation.
   buildParentMap();
 
-  // Compute active arrays for RowU gating.
+  // Compute active arrays for RowU gating, keeping the previous set: a
+  // representative that has just become active has RowU edges that its
+  // recorded reads have not been pushed along yet.
+  std::unordered_set<TNode> wasActive;
+  wasActive.swap(d_activeArrays);
   computeActiveArrays();
 
-  // Propagate all registered selects through store chains.
-  for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
+  if (incremental)
   {
-    if (d_state.isInConflict())
+    applyDelta(wasActive);
+  }
+  else
+  {
+    // Everything merged so far is visible to the walk below.
+    d_mergeQueue.clear();
+    d_numStoresDone = d_stores.size();
+    // Propagate all registered selects through store chains.
+    size_t sz = d_selects.size();
+    for (size_t i = 0; i < sz; ++i)
     {
-      return;
+      if (d_state.isInConflict())
+      {
+        return;
+      }
+      checkAccess(d_selects[i]);
     }
-    checkAccess(d_selects[i]);
+    d_numSelectsDone = sz;
+  }
+  if (d_state.isInConflict())
+  {
+    return;
   }
 
   // Handle disequalities (DisEq rule)
-  if (!d_state.isInConflict())
-  {
-    checkDisequalities();
-  }
+  checkDisequalities();
 
   // Pending care pairs: for pairs where at least one index is not a
   // trigger term, send explicit split lemmas since the care graph
   // cannot handle them.
-  if (!d_state.isInConflict())
+  //
+  // A pair only needs looking at once between rebuilds. After that it has
+  // either been split, and d_indexSplitCache keeps it from being split again,
+  // or it was decided, or both its terms were trigger terms. Without a pop --
+  // which forces a rebuild -- a decided pair stays decided and a trigger term
+  // stays one.
+  for (size_t sz = d_pendingCarePairs.size(); d_numSplitsDone < sz;
+       ++d_numSplitsDone)
   {
-    for (const auto& [t1, t2] : d_pendingCarePairs)
+    if (d_state.isInConflict())
     {
-      if (d_state.isInConflict())
-      {
-        break;
-      }
-      if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
-      {
-        continue;
-      }
-      // Trigger-term pairs are handled via the care graph.
-      if (d_ee->isTriggerTerm(t1, THEORY_ARRAYS)
-          && d_ee->isTriggerTerm(t2, THEORY_ARRAYS))
-      {
-        continue;
-      }
-      Node split = t1.eqNode(t2);
-      if (d_indexSplitCache.insert(split))
-      {
-        Trace("arrays::aext")
-            << "Index split (non-shared): " << split << std::endl;
-        d_im.lemma(split.orNode(split.notNode()),
-                   InferenceId::ARRAYS_AEXT_INDEX_SPLIT);
-      }
+      break;
+    }
+    const auto& [t1, t2] = d_pendingCarePairs[d_numSplitsDone];
+    if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
+    {
+      continue;
+    }
+    // Trigger-term pairs are handled via the care graph.
+    if (d_ee->isTriggerTerm(t1, THEORY_ARRAYS)
+        && d_ee->isTriggerTerm(t2, THEORY_ARRAYS))
+    {
+      continue;
+    }
+    Node split = t1.eqNode(t2);
+    if (d_indexSplitCache.insert(split))
+    {
+      Trace("arrays::aext") << "Index split (non-shared): " << split
+                            << std::endl;
+      d_im.lemma(split.orNode(split.notNode()),
+                 InferenceId::ARRAYS_AEXT_INDEX_SPLIT);
     }
   }
 
@@ -325,9 +374,321 @@ void AextArraySolver::check(Theory::Effort level)
   if (!d_state.isInConflict())
   {
     d_stateGen = d_builtGen;
+    if (incremental && options().arrays.arraysAextCheckIncremental)
+    {
+      checkIncrementalState();
+    }
   }
 
   Trace("arrays::aext") << "AextArraySolver::check() done" << std::endl;
+}
+
+void AextArraySolver::applyDelta(const std::unordered_set<TNode>& wasActive)
+{
+  std::vector<Node> losers;
+  losers.swap(d_mergeQueue);
+
+  // Every class a queued merge touched, by its current representative. A
+  // merge queued at a level that has been popped since is stale, and
+  // harmless: its loser is a representative again or no longer a term, and
+  // re-deriving what an unchanged class holds changes nothing.
+  std::unordered_set<TNode> merged;
+  for (const Node& b : losers)
+  {
+    if (d_ee->hasTerm(b))
+    {
+      merged.insert(d_ee->getRepresentative(b));
+    }
+  }
+
+  // Index merges. They are the one change that can invalidate what is
+  // recorded: an edge a read crossed closes once its store index joins the
+  // read's index class, and the read has then no path to where it went next.
+  // Only reads whose index class merged are affected -- every edge condition
+  // compares a store index against the read's own index class, which for any
+  // other read is still a different class -- so drop everything those reads
+  // recorded and walk them again. Dropping an entry that another read stopped
+  // at is fine: that read had the same index representative, so it is walked
+  // again too.
+  std::vector<TNode> redo;
+  if (!merged.empty())
+  {
+    for (size_t i = 0; i < d_numSelectsDone; ++i)
+    {
+      TNode sel = d_selects[i];
+      if (d_ee->hasTerm(sel) && merged.count(d_ee->getRepresentative(sel[1]))
+          && d_checkAccessCache.erase(sel))
+      {
+        redo.push_back(sel);
+      }
+    }
+  }
+  if (!redo.empty())
+  {
+    for (auto it = d_arrayModels.begin(); it != d_arrayModels.end();)
+    {
+      auto& model = it->second;
+      for (auto jt = model.begin(); jt != model.end();)
+      {
+        if (merged.count(d_ee->getRepresentative(jt->second.index)))
+        {
+          jt = model.erase(jt);
+        }
+        else
+        {
+          ++jt;
+        }
+      }
+      it = model.empty() ? d_arrayModels.erase(it) : std::next(it);
+    }
+  }
+  d_numDeltaRedoReads += redo.size();
+
+  // Array merges. Move what was recorded at the losing representative to the
+  // winning one; where both hold a read at the same index class, they have
+  // just met, so check CongR between them and keep one. Every entry left keyed
+  // on an index representative is still keyed on a representative: any index
+  // class that merged was dropped above.
+  std::unordered_set<TNode> dirty;
+  for (const Node& b : losers)
+  {
+    if (!d_ee->hasTerm(b) || !b.getType().isArray())
+    {
+      continue;
+    }
+    TNode r = d_ee->getRepresentative(b);
+    dirty.insert(r);
+    auto it = d_arrayModels.find(b);
+    if (r == b || it == d_arrayModels.end())
+    {
+      continue;
+    }
+    std::unordered_map<TNode, PropagatedRead> moved = std::move(it->second);
+    d_arrayModels.erase(it);
+    auto& into = d_arrayModels[r];
+    for (const auto& [k, read] : moved)
+    {
+      auto [jt, inserted] = into.emplace(k, read);
+      if (!inserted)
+      {
+        checkCongruence(read, jt->second, r);
+      }
+    }
+  }
+
+  // New stores. A store is a new RowD edge and AccessStore target at its own
+  // class, and a new RowU edge out of its base's class.
+  for (size_t sz = d_stores.size(); d_numStoresDone < sz; ++d_numStoresDone)
+  {
+    TNode store = d_stores[d_numStoresDone];
+    if (d_ee->hasTerm(store))
+    {
+      dirty.insert(d_ee->getRepresentative(store));
+      dirty.insert(d_ee->getRepresentative(store[0]));
+    }
+  }
+
+  // The RowU gate only opens along a context path. A representative it has
+  // just opened at has new RowU edges.
+  for (TNode a : d_activeArrays)
+  {
+    if (!wasActive.count(a))
+    {
+      dirty.insert(a);
+    }
+  }
+
+  // Resume every read recorded at a changed class from there: it may now meet
+  // stores, a constant array or parents that were not in its class, and edges
+  // out of that class may have opened. Collect them first, since resuming
+  // records more.
+  std::vector<std::pair<TNode, TNode>> resume;
+  for (TNode r : dirty)
+  {
+    auto it = d_arrayModels.find(r);
+    if (it != d_arrayModels.end())
+    {
+      for (const auto& [k, read] : it->second)
+      {
+        resume.emplace_back(read.select, r);
+      }
+    }
+  }
+  d_numDeltaResumes += resume.size();
+  for (const auto& [sel, r] : resume)
+  {
+    if (d_state.isInConflict())
+    {
+      return;
+    }
+    propagateFrom(sel, r, true);
+  }
+
+  // Finally the reads dropped above, and the reads registered since.
+  for (TNode sel : redo)
+  {
+    if (d_state.isInConflict())
+    {
+      return;
+    }
+    checkAccess(sel);
+  }
+  for (size_t sz = d_selects.size(); d_numSelectsDone < sz; ++d_numSelectsDone)
+  {
+    if (d_state.isInConflict())
+    {
+      return;
+    }
+    checkAccess(d_selects[d_numSelectsDone]);
+  }
+}
+
+void AextArraySolver::recordJoin(TNode t1, TNode t2, TNode guard)
+{
+  if (options().arrays.arraysAextCheckIncremental)
+  {
+    d_incrementalJoins.push_back(
+        nodeManager()->mkNode(Kind::SEXPR, {t1, t2, guard}));
+  }
+}
+
+void AextArraySolver::checkIncrementalState()
+{
+  // Rebuild into fresh structures, with lemmas replaced by recording what the
+  // rebuild would have had to justify, and put the incremental ones back.
+  auto models = std::move(d_arrayModels);
+  auto carePairs = std::move(d_pendingCarePairs);
+  auto carePairCache = std::move(d_pendingCarePairCache);
+  auto accessCache = std::move(d_checkAccessCache);
+  d_arrayModels.clear();
+  d_pendingCarePairs.clear();
+  d_pendingCarePairCache.clear();
+  d_checkAccessCache.clear();
+  d_shadowObligations.clear();
+  d_inShadowRebuild = true;
+  for (size_t i = 0; i < d_numSelectsDone; ++i)
+  {
+    checkAccess(d_selects[i]);
+  }
+  d_inShadowRebuild = false;
+  std::swap(models, d_arrayModels);
+  std::swap(carePairs, d_pendingCarePairs);
+  std::swap(carePairCache, d_pendingCarePairCache);
+  std::swap(accessCache, d_checkAccessCache);
+  // From here on, `models` and `carePairs` are the rebuilt ones.
+
+  // Two terms are joined if they are equal, or if a lemma equating them was
+  // sent on this path whose guard nothing has falsified since: until the SAT
+  // solver falsifies a guard literal it cannot avoid the conclusion, and
+  // falsifying an index disequality is an index merge, which the incremental
+  // check reacts to. Terms outside the equality engine (a constant array's
+  // default value) stand for themselves.
+  std::unordered_map<Node, Node> parent;
+  std::function<Node(Node)> find = [&](Node x) -> Node {
+    if (d_ee->hasTerm(x))
+    {
+      x = d_ee->getRepresentative(x);
+    }
+    auto it = parent.find(x);
+    if (it == parent.end() || it->second == x)
+    {
+      return x;
+    }
+    Node root = find(it->second);
+    parent[x] = root;
+    return root;
+  };
+  auto falsified = [&](TNode lit) {
+    bool pol = lit.getKind() != Kind::NOT;
+    TNode atom = pol ? lit : lit[0];
+    if (atom.getKind() != Kind::EQUAL || !d_ee->hasTerm(atom[0])
+        || !d_ee->hasTerm(atom[1]))
+    {
+      return false;
+    }
+    return pol ? d_ee->areDisequal(atom[0], atom[1], false)
+               : d_ee->areEqual(atom[0], atom[1]);
+  };
+  for (const Node& join : d_incrementalJoins)
+  {
+    TNode guard = join[2];
+    bool live = true;
+    if (guard.getKind() == Kind::AND)
+    {
+      for (TNode lit : guard)
+      {
+        live = live && !falsified(lit);
+      }
+    }
+    else if (!guard.isConst())
+    {
+      live = !falsified(guard);
+    }
+    if (live)
+    {
+      Node r1 = find(join[0]);
+      Node r2 = find(join[1]);
+      if (r1 != r2)
+      {
+        parent[r1] = r2;
+      }
+    }
+  }
+
+  // Everything the rebuild derived, the incremental state reaches too: the
+  // same slots, the same terms joined, and the same undecided index pairs.
+  for (const auto& [t1, t2] : d_shadowObligations)
+  {
+    AlwaysAssert(find(t1) == find(t2))
+        << "incremental AEXT check: the rebuild needs " << t1 << " = " << t2
+        << ", which no live lemma provides";
+  }
+  auto slotCount = [](const auto& m) {
+    size_t n = 0;
+    for (const auto& [a, model] : m)
+    {
+      n += model.size();
+    }
+    return n;
+  };
+  AlwaysAssert(slotCount(models) == slotCount(d_arrayModels))
+      << "incremental AEXT check: " << slotCount(d_arrayModels)
+      << " slots, the rebuild has " << slotCount(models);
+  for (const auto& [arrayRep, model] : models)
+  {
+    auto it = d_arrayModels.find(arrayRep);
+    for (const auto& [indexRep, read] : model)
+    {
+      AlwaysAssert(it != d_arrayModels.end() && it->second.count(indexRep))
+          << "incremental AEXT check: the rebuild records " << read.select
+          << " at " << arrayRep << ", where nothing is recorded";
+      TNode inc = it->second.at(indexRep).select;
+      AlwaysAssert(find(inc) == find(read.select))
+          << "incremental AEXT check: " << inc << " and " << read.select
+          << " share a slot at " << arrayRep << " but are not joined";
+    }
+  }
+  std::unordered_set<Node> incPairs;
+  for (const auto& [t1, t2] : d_pendingCarePairs)
+  {
+    Node r1 = d_ee->getRepresentative(t1);
+    Node r2 = d_ee->getRepresentative(t2);
+    incPairs.insert(r1 < r2 ? r1.eqNode(r2) : r2.eqNode(r1));
+  }
+  for (const auto& [t1, t2] : carePairs)
+  {
+    if (d_ee->areEqual(t1, t2) || d_ee->areDisequal(t1, t2, false))
+    {
+      continue;
+    }
+    Node r1 = d_ee->getRepresentative(t1);
+    Node r2 = d_ee->getRepresentative(t2);
+    AlwaysAssert(incPairs.count(r1 < r2 ? r1.eqNode(r2) : r2.eqNode(r1)))
+        << "incremental AEXT check: the rebuild requests " << t1 << " vs "
+        << t2 << ", which the incremental state does not";
+  }
+  Trace("arrays::aext") << "incremental state agrees with a rebuild ("
+                        << slotCount(models) << " slots)" << std::endl;
 }
 
 void AextArraySolver::buildParentMap()
@@ -451,7 +812,55 @@ void AextArraySolver::checkAccess(TNode select)
   propagateFrom(select, select[0]);
 }
 
-void AextArraySolver::propagateFrom(TNode select, TNode start)
+void AextArraySolver::checkCongruence(const PropagatedRead& arriving,
+                                      const PropagatedRead& existing,
+                                      TNode arrayRep)
+{
+  if (d_ee->areEqual(arriving.select, existing.select))
+  {
+    return;
+  }
+  if (d_inShadowRebuild)
+  {
+    d_shadowObligations.emplace_back(arriving.select, existing.select);
+    return;
+  }
+  Node conc = arriving.select.eqNode(existing.select);
+  std::vector<Node> expVec;
+  std::vector<std::vector<PathEdge>> paths(2);
+  TNode entry1 =
+      findPathConditions(arriving.select, arrayRep, expVec, &paths[0]);
+  TNode entry2 =
+      findPathConditions(existing.select, arrayRep, expVec, &paths[1]);
+  if (entry1.isNull() || entry2.isNull())
+  {
+    // Unreachable by the argument on findPathConditions; drop the lemma
+    // rather than send one whose guard we cannot produce.
+    return;
+  }
+  if (arriving.index != existing.index)
+  {
+    expVec.push_back(arriving.index.eqNode(existing.index));
+  }
+  Node exp = nodeManager()->mkAnd(expVec);
+  Trace("arrays::aext") << "CongR: " << exp << " => " << conc << std::endl;
+  recordJoin(arriving.select, existing.select, exp);
+  // Keyed on the whole lemma: the same conclusion may be justified by
+  // several distinct path condition sets, and each one has to be sent.
+  if (d_congruenceLemmaCache.insert(exp.impNode(conc)))
+  {
+    d_im.arrayLemma(conc,
+                    InferenceId::ARRAYS_AEXT_CONGRUENCE,
+                    exp,
+                    ProofRule::ARRAYS_READ_OVER_WRITE,
+                    std::move(paths));
+    ++d_numCongruenceLemmas;
+  }
+}
+
+void AextArraySolver::propagateFrom(TNode select,
+                                    TNode start,
+                                    bool recordedAtStart)
 {
   TNode index = select[1];
   TNode indexRep = d_ee->getRepresentative(index);
@@ -467,47 +876,23 @@ void AextArraySolver::propagateFrom(TNode select, TNode start)
 
     TNode arrayRep = d_ee->getRepresentative(array);
 
-    // Step 1: Record this read and check for congruence (CongR).
+    // Step 1: Record this read and check for congruence (CongR). A read
+    // resumed where it is already recorded skips this for its own entry.
+    if (recordedAtStart)
+    {
+      recordedAtStart = false;
+      Assert(d_arrayModels.count(arrayRep)
+             && d_arrayModels[arrayRep].count(indexRep)
+             && d_arrayModels[arrayRep][indexRep].select == select)
+          << "resuming " << select << " where it is not recorded";
+    }
+    else
     {
       auto& model = d_arrayModels[arrayRep];
       auto it = model.find(indexRep);
       if (it != model.end())
       {
-        PropagatedRead& existing = it->second;
-        if (!d_ee->areEqual(select, existing.select))
-        {
-          Node conc = select.eqNode(existing.select);
-          std::vector<Node> expVec;
-          std::vector<std::vector<PathEdge>> paths(2);
-          TNode entry1 =
-              findPathConditions(select, arrayRep, expVec, &paths[0]);
-          TNode entry2 =
-              findPathConditions(existing.select, arrayRep, expVec, &paths[1]);
-          if (entry1.isNull() || entry2.isNull())
-          {
-            // Unreachable by the argument on findPathConditions; drop the
-            // lemma rather than send one whose guard we cannot produce.
-            continue;
-          }
-          if (index != existing.index)
-          {
-            expVec.push_back(index.eqNode(existing.index));
-          }
-          Node exp = nm->mkAnd(expVec);
-          Trace("arrays::aext")
-              << "CongR: " << exp << " => " << conc << std::endl;
-          // Keyed on the whole lemma: the same conclusion may be justified by
-          // several distinct path condition sets, and each one has to be sent.
-          if (d_congruenceLemmaCache.insert(exp.impNode(conc)))
-          {
-            d_im.arrayLemma(conc,
-                            InferenceId::ARRAYS_AEXT_CONGRUENCE,
-                            exp,
-                            ProofRule::ARRAYS_READ_OVER_WRITE,
-                            std::move(paths));
-            ++d_numCongruenceLemmas;
-          }
-        }
+        checkCongruence({select, index}, it->second, arrayRep);
         continue;
       }
       model[indexRep] = {select, index};
@@ -530,6 +915,11 @@ void AextArraySolver::propagateFrom(TNode select, TNode start)
           {
             if (!d_ee->areEqual(select, n[2]))
             {
+              if (d_inShadowRebuild)
+              {
+                d_shadowObligations.emplace_back(select, n[2]);
+                break;
+              }
               Node conc = select.eqNode(n[2]);
               std::vector<Node> expVec;
               std::vector<std::vector<PathEdge>> paths(1);
@@ -553,6 +943,7 @@ void AextArraySolver::propagateFrom(TNode select, TNode start)
               Trace("arrays::aext")
                   << "AccessStore: entryArray=" << entryArray << " store=" << n
                   << " reason=" << reason << " => " << conc << std::endl;
+              recordJoin(select, n[2], reason);
               d_im.arrayLemma(conc,
                               InferenceId::ARRAYS_AEXT_ROW,
                               reason,
@@ -579,6 +970,11 @@ void AextArraySolver::propagateFrom(TNode select, TNode start)
           Node defValue = storeAll.getValue();
           if (!d_ee->hasTerm(defValue) || !d_ee->areEqual(select, defValue))
           {
+            if (d_inShadowRebuild)
+            {
+              d_shadowObligations.emplace_back(select, defValue);
+              break;
+            }
             Node conc = select.eqNode(defValue);
             std::vector<Node> expVec;
             std::vector<std::vector<PathEdge>> paths(1);
@@ -597,6 +993,7 @@ void AextArraySolver::propagateFrom(TNode select, TNode start)
             Node reason = nm->mkAnd(expVec);
             Trace("arrays::aext") << "AccessConstArray: " << reason << " => "
                                   << conc << std::endl;
+            recordJoin(select, defValue, reason);
             d_im.arrayLemma(conc,
                             InferenceId::ARRAYS_AEXT_CONST_ARRAY,
                             reason,
@@ -778,7 +1175,8 @@ TNode AextArraySolver::findPathConditions(TNode select,
   // The BFS explores a superset of what forward propagation reached -- it does
   // not apply the d_activeArrays gate, and the equality engine does not move
   // during the select loop -- so every conflict checkAccess detects has a path
-  // here. Should that ever stop holding, do not walk a tree that has no entry
+  // here. What earlier checks recorded is kept valid for this by the handling
+  // of index merges in applyDelta (VALIDITY on the propagation state). Should that ever stop holding, do not walk a tree that has no entry
   // for targetRep: the walk below would dereference an end iterator, which
   // Assert does not prevent in a production build. Report the failure instead
   // and let the caller drop the lemma.

@@ -102,6 +102,14 @@ class ArraySolver : protected EnvObj
    * Called from TheoryArrays::NotifyClass::eqNotifyMerge.
    */
   virtual void eqNotifyMerge(TNode a, TNode b) = 0;
+  /**
+   * Callback for when two terms that are not arrays are merged in the
+   * equality engine; b is the representative that lost. Called from
+   * TheoryArrays::NotifyClass::eqNotifyMerge.
+   */
+  virtual void eqNotifyMergeNonArray(CVC5_UNUSED TNode a, CVC5_UNUSED TNode b)
+  {
+  }
   //--------------------------------- end equality engine callbacks
 
   //--------------------------------- standard check
