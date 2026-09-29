@@ -212,14 +212,20 @@ void AextArraySolver::postCheck(Theory::Effort level) { check(level); }
 
 void AextArraySolver::check(Theory::Effort level)
 {
-  if (!Theory::fullEffort(level))
-  {
-    return;
-  }
+  // This runs at every effort level, standard included. Waiting for full
+  // effort lets the SAT solver build a complete assignment before any array
+  // reasoning prunes it: on QF_AUFLIA/cvc/pp-dmem, a Burch-Dill
+  // pipelined-processor proof, that took over 25 times the decisions the
+  // default solver needs, which derives its lemmas as facts arrive, and did
+  // not finish. What makes checking this often affordable is that a check
+  // only applies what changed since the previous one (see applyDelta).
+  //
+  // Index splits are the exception; see the loop that sends them.
   if (d_state.isInConflict())
   {
     return;
   }
+  bool fullEffort = Theory::fullEffort(level);
 
   // Skip the check if nothing it reads has changed since the last one that ran
   // to completion. The propagation below is a function of the equality engine
@@ -239,9 +245,13 @@ void AextArraySolver::check(Theory::Effort level)
   // asserted a different fact and landed on the same count would match. Given
   // that, equal counts mean nothing was asserted or registered since, and the
   // structures below, which computeCareGraph() reads, describe this state.
+  //
+  // A full effort check still has work to do in that state if index splits
+  // were left for it.
   CheckState state{
       d_ee->getNumAssertedEqualities(), d_selects.size(), d_stores.size()};
-  if (d_stateGen.get() == d_builtGen && d_builtState == state)
+  if (d_stateGen.get() == d_builtGen && d_builtState == state
+      && !(fullEffort && d_numSplitsDone < d_pendingCarePairs.size()))
   {
     ++d_numCheckSkips;
     return;
@@ -336,12 +346,23 @@ void AextArraySolver::check(Theory::Effort level)
   // trigger term, send explicit split lemmas since the care graph
   // cannot handle them.
   //
+  // Only at full effort. A split exists to get an index pair decided before
+  // the SAT solver declares a model, so nothing is lost by waiting for one,
+  // and sending it earlier registers an index equality atom for every pair
+  // any read crossed on the way to some partial assignment. With bit-vector
+  // indices each such atom is bit-blasted: on QF_ABV/dwp_formulas, splits at
+  // standard effort took 11 instances that solve in under 4s to timeouts,
+  // one of them from 17,596 decisions against 106. Measured over 2,505
+  // SMT-LIB benchmarks at 30s, waiting solves 21 more (2376 -> 2397),
+  // mostly QF_ABV (366 -> 378) and QF_ALIA (117 -> 125), with no losses
+  // beyond noise.
+  //
   // A pair only needs looking at once between rebuilds. After that it has
   // either been split, and d_indexSplitCache keeps it from being split again,
   // or it was decided, or both its terms were trigger terms. Without a pop --
   // which forces a rebuild -- a decided pair stays decided and a trigger term
   // stays one.
-  for (size_t sz = d_pendingCarePairs.size(); d_numSplitsDone < sz;
+  for (size_t sz = d_pendingCarePairs.size(); fullEffort && d_numSplitsDone < sz;
        ++d_numSplitsDone)
   {
     if (d_state.isInConflict())

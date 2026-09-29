@@ -114,6 +114,11 @@ set(regress_0_tests
   regress0/arrays/ackermann3.smt2
   regress0/arrays/aext-arith-alias-explain.smt2
   regress0/arrays/aext-care.smt2
+  regress0/arrays/aext-inc-index-merge.smt2
+  regress0/arrays/aext-inc-merge-access-store.smt2
+  regress0/arrays/aext-inc-new-store.smt2
+  regress0/arrays/aext-inc-push-pop.smt2
+  regress0/arrays/aext-inc-slot-collision.smt2
   regress0/arrays/aext-path-guard-shape.smt2
   regress0/arrays/aext-proof-access-store.smt2
   regress0/arrays/aext-proof-congr-chain.smt2
