@@ -53,6 +53,7 @@
 #include "theory/arrays/array_solver.h"
 #include "theory/arrays/inference_manager.h"
 #include "theory/arrays/path_edge.h"
+#include "util/hash.h"
 #include "util/statistics_stats.h"
 
 namespace cvc5::internal {
@@ -185,23 +186,34 @@ class AextArraySolver : public ArraySolver
    */
   void propagateRIntro2();
   /**
+   * Assert rN = rC by RIntro2 through store, if its conditions hold and it
+   * has not been derived on this path yet. rN's array must be in the class of
+   * store and rC's in the class of store[0], at the same index class.
+   */
+  void fireRIntro2(TNode store, TNode rN, TNode rC);
+  /**
    * Process array disequalities (DisEq rule).
    */
   void checkDisequalities();
+  /** Open the RowU gate at arrayRep, and close it downwards. */
+  void openGate(TNode arrayRep);
   /**
-   * Build the parent store map for the current check.
+   * Update the RowU gate for the merge of array class loser into winner,
+   * which brought movedStores along.
    */
-  void buildParentMap();
-  /** Compute active array representatives for RowU gating. */
-  void computeActiveArrays();
+  void updateGateOnMerge(TNode loser,
+                         TNode winner,
+                         const std::vector<TNode>& movedStores);
+  /** In a debug build, assert the structural fact the RowU gate rests on. */
+  void checkGatePrecondition();
   /**
    * The undecided index pairs the propagation state depends on: for every
    * entry (X, k) -> r, the pair of r's index and the index of each store an
    * open edge out of X goes through -- every STORE in X (RowD), and every
    * parent of X if the RowU gate is open at X -- that the equality engine
    * neither equates nor separates. These are exactly the pairs a walk from
-   * scratch would cross undecided. Refreshes d_parentStores and
-   * d_activeArrays first, so it can be called outside check().
+   * scratch would cross undecided. Everything it reads is kept under the undo
+   * log, so it can be called outside check().
    */
   std::vector<std::pair<TNode, TNode>> pendingIndexPairs();
   //--------------------------------- end propagation
@@ -296,8 +308,15 @@ class AextArraySolver : public ArraySolver
 
   /** All registered SELECT terms (context-dependent) */
   context::CDList<TNode> d_selects;
+  /**
+   * The position of each registered read in d_selects, as of its latest
+   * registration. Only ever added to.
+   */
+  std::unordered_map<Node, size_t> d_selectOrder;
   /** All registered STORE terms (context-dependent) */
   context::CDList<TNode> d_stores;
+  /** All registered STORE_ALL terms (context-dependent) */
+  context::CDList<TNode> d_constArrays;
   /** Array disequalities in current context */
   context::CDList<Node> d_arrayDisequalities;
   /** Disequalities for which a witness has already been generated */
@@ -450,10 +469,21 @@ class AextArraySolver : public ArraySolver
       WALKED_ADDED,
       /** read d_a was removed from d_checkAccessCache */
       WALKED_REMOVED,
-      /** representative d_a was added to d_gateOpened */
+      /** representative d_a was added to d_activeArrays */
       GATE_OPENED,
       /** a check started; the counters it found are d_undoCounters.back() */
       COUNTERS,
+      /** a term was appended to one of the lists of class d_a */
+      STORE_LISTED,
+      CONST_ARRAY_LISTED,
+      PARENT_LISTED,
+      READ_LISTED,
+      INDEX_READ_LISTED,
+      /**
+       * the lists of class d_a were appended to those of class d_b, as many
+       * of each as d_undoMoves.back() says
+       */
+      LISTS_MOVED,
     };
     Kind d_kind;
     /**
@@ -466,7 +496,46 @@ class AextArraySolver : public ArraySolver
   struct UndoCounters
   {
     size_t d_selects, d_stores, d_merges;
+    size_t d_listSelects, d_listStores, d_listConstArrays, d_listMerges;
   };
+  /** The lengths of the lists a LISTS_MOVED record moved. */
+  struct UndoMove
+  {
+    size_t d_stores, d_constArrays, d_parents, d_reads, d_indexReads;
+  };
+  /**
+   * The terms of a class that propagation looks at, so that it need not walk
+   * the class. For an array class: its STOREs, its STORE_ALLs, the STOREs
+   * whose base is in it, and the registered reads whose array is in it. For
+   * an index class: the registered reads whose index is in it.
+   */
+  struct ClassLists
+  {
+    std::vector<TNode> d_stores;
+    std::vector<TNode> d_constArrays;
+    std::vector<TNode> d_parents;
+    std::vector<TNode> d_reads;
+    std::vector<TNode> d_indexReads;
+  };
+  /**
+   * The lists of each class, keyed on its representative. Kept up to date by
+   * updateClassLists from registrations and merges, and under the undo log.
+   * A class with nothing to list may have no entry.
+   */
+  std::unordered_map<TNode, ClassLists> d_classLists;
+  /** The lists of the class of rep, possibly empty. */
+  const ClassLists& classListsOf(TNode rep) const;
+  /** Append term to list `which` of the class of rep. */
+  void addToClassList(TNode rep, UndoRecord::Kind which, TNode term);
+  /** Apply the registrations and merges since the last update. */
+  void updateClassLists();
+  /** Move records of the LISTS_MOVED records in d_undoLog, in order. */
+  std::vector<UndoMove> d_undoMoves;
+  /** How far updateClassLists has got in each of the lists it follows. */
+  size_t d_listSelectsDone = 0;
+  size_t d_listStoresDone = 0;
+  size_t d_listConstArraysDone = 0;
+  size_t d_listMergesDone = 0;
   /** Add read select as the entry of slot (arrayRep, indexRep). */
   void addSlot(TNode arrayRep, TNode indexRep, TNode select);
   /** Remove the entry of slot (arrayRep, indexRep), which must exist. */
@@ -494,20 +563,19 @@ class AextArraySolver : public ArraySolver
   size_t d_numSelectsDone = 0;
   /** How many of d_stores the propagation state accounts for. */
   size_t d_numStoresDone = 0;
-  /**
-   * The representatives the RowU gate has been open at so far on this path,
-   * as far as applyDelta has taken account of it.
-   */
-  std::unordered_set<Node> d_gateOpened;
+  /** The classes the RowU gate opened at in this check, for applyDelta. */
+  std::vector<TNode> d_gateOpenedNow;
   std::unordered_set<Node> d_checkAccessCache;
   std::unordered_map<TNode, std::unordered_map<TNode, PropagatedRead>>
       d_arrayModels;
-  std::unordered_map<TNode, std::vector<TNode>> d_parentStores;
   /**
    * Representatives from which RowU (upward propagation into parent stores) is
-   * allowed. Built by computeActiveArrays: the representative of every STORE
-   * term whose equivalence class has more than one member, closed downwards
-   * through store bases.
+   * allowed: the representative of every STORE term whose equivalence class
+   * has more than one member, closed downwards through store bases. Kept
+   * under the undo log and updated from the same changes as the class lists
+   * (see openGate and updateGateOnMerge): along a context path, classes only
+   * grow, so the set only grows. It may hold representatives that have
+   * since lost a merge; lookups are by current representative.
    *
    * WHY GATING HERE IS SOUND. Suppressing upward propagation is where a wrong
    * "sat" would come from, so the argument is spelled out.
@@ -569,8 +637,8 @@ class AextArraySolver : public ArraySolver
    * An earlier measurement over ~360 array files from test/regress put the
    * cost at 2%, and 20b8aa0c6 reported no answer changes at all. Both were
    * artefacts of a set too small and too timeout-dominated to measure this;
-   * do not re-derive the conclusion from it. The assertion at the end of
-   * computeActiveArrays pins the structural fact argued above, which is the
+   * do not re-derive the conclusion from it. The assertion in
+   * checkGatePrecondition pins the structural fact argued above, which is the
    * part a future change could break silently.
    *
    * HISTORY. 7288daf85d replaced this with a gate on read-presence at the

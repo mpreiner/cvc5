@@ -12,6 +12,7 @@
 
 #include "theory/arrays/aext_solver.h"
 
+#include <algorithm>
 #include <deque>
 #include <functional>
 
@@ -42,6 +43,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_lastSplitState(context()),
       d_selects(context()),
       d_stores(context()),
+      d_constArrays(context()),
       d_arrayDisequalities(context()),
       d_witnessDiseqs(context()),
       d_witnessRepPairCount(context()),
@@ -97,6 +99,7 @@ std::string AextArraySolver::identify() const { return "AextArraySolver"; }
 void AextArraySolver::preRegisterSelect(TNode node)
 {
   Assert(node.getKind() == Kind::SELECT);
+  d_selectOrder[node] = d_selects.size();
   d_selects.push_back(node);
 }
 
@@ -125,10 +128,11 @@ void AextArraySolver::preRegisterStore(TNode node)
                        ProofRule::ARRAYS_READ_OVER_WRITE_1);
 }
 
-void AextArraySolver::preRegisterStoreAll(TNode /*node*/)
+void AextArraySolver::preRegisterStoreAll(TNode node)
 {
-  // STORE_ALL registration for AEXT: no additional solver-specific work needed.
-  // The shared code in TheoryArrays already sets d_defValues.
+  // The shared code in TheoryArrays already sets d_defValues; AEXT only needs
+  // to know which class the constant array is in (see updateClassLists).
+  d_constArrays.push_back(node);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -272,35 +276,38 @@ void AextArraySolver::check(Theory::Effort level)
   Trace("arrays::aext") << "AextArraySolver::check() with " << d_selects.size()
                         << " selects and " << d_stores.size() << " stores"
                         << std::endl;
-  d_undoCounters.push_back(
-      {d_numSelectsDone, d_numStoresDone, d_numMergesDone});
+  d_gateOpenedNow.clear();
+  d_undoCounters.push_back({d_numSelectsDone,
+                            d_numStoresDone,
+                            d_numMergesDone,
+                            d_listSelectsDone,
+                            d_listStoresDone,
+                            d_listConstArraysDone,
+                            d_listMergesDone});
   d_undoLog.push_back({UndoRecord::COUNTERS, Node(), Node(), Node()});
 
-  // RIntro2 theory propagation. This runs before the two maps below are built,
-  // because it asserts internal facts: the equalities it derives are between
-  // SELECT terms, but congruence turns those into array merges whenever the
-  // selects are store values. Building d_parentStores and d_activeArrays first
-  // left them keyed on representatives that are no longer representatives, and
-  // a missed d_parentStores lookup silently disables RowU -- the direction that
-  // costs satisfiability completeness. (Measured before the reorder:
-  // regress0/aufbv/fifo32bc06k08 had 15 of 108 checks where RIntro2 moved the
-  // equality engine.) For the same reason it runs before applyDelta: the
-  // merges it causes are queued like any other, and handled with them.
+  // RIntro2 theory propagation. This runs before the class lists and the gate
+  // below are brought up to date, because it asserts internal facts: the
+  // equalities it derives are between SELECT terms, but congruence turns
+  // those into array merges whenever the selects are store values. Updating
+  // the lists first left them keyed on representatives that are no longer
+  // representatives, and a missed parent lookup silently disables RowU -- the
+  // direction that costs satisfiability completeness. (Measured before the
+  // reorder: regress0/aufbv/fifo32bc06k08 had 15 of 108 checks where RIntro2
+  // moved the equality engine.) For the same reason it runs before
+  // applyDelta: the merges it causes are queued like any other, and handled
+  // with them.
   propagateRIntro2();
-  // Both maps below iterate equivalence classes, and EqClassIterator requires
-  // a consistent equality engine, so bail out before them if RIntro2 derived a
-  // conflict. Nothing is stamped on this path, so the next check() undoes
-  // what this one recorded and redoes it.
+  // Everything below assumes a consistent equality engine -- EqClassIterator,
+  // for one, requires it -- so bail out if RIntro2 derived a conflict.
+  // Nothing is stamped on this path, so the next check() undoes what this one
+  // recorded and redoes it.
   if (d_state.isInConflict())
   {
     return;
   }
-
-  // Build the parent store map for RowU propagation.
-  buildParentMap();
-
-  // Compute active arrays for RowU gating.
-  computeActiveArrays();
+  updateClassLists();
+  checkGatePrecondition();
 
   applyDelta();
   if (d_state.isInConflict())
@@ -389,10 +396,6 @@ bool AextArraySolver::unmarkWalked(TNode select)
 
 std::vector<std::pair<TNode, TNode>> AextArraySolver::pendingIndexPairs()
 {
-  // The maps are only current as of the last check that ran, and a skipped
-  // check may follow one that a pop has since undone.
-  buildParentMap();
-  computeActiveArrays();
   std::vector<std::pair<TNode, TNode>> pairs;
   std::unordered_set<std::pair<TNode, TNode>, PairHashFunction<TNode, TNode>>
       seen;
@@ -409,25 +412,19 @@ std::vector<std::pair<TNode, TNode>> AextArraySolver::pendingIndexPairs()
   };
   for (const auto& [arrayRep, model] : d_arrayModels)
   {
+    const ClassLists& lists = classListsOf(arrayRep);
+    bool active = d_activeArrays.count(arrayRep);
     for (const auto& [indexRep, read] : model)
     {
-      for (eq::EqClassIterator eqi(arrayRep, d_ee); !eqi.isFinished(); ++eqi)
+      for (TNode n : lists.d_stores)
       {
-        TNode n = *eqi;
-        if (n.getKind() == Kind::STORE)
-        {
-          consider(read.index, n[1]);
-        }
+        consider(read.index, n[1]);
       }
-      if (d_activeArrays.count(arrayRep))
+      if (active)
       {
-        auto pit = d_parentStores.find(arrayRep);
-        if (pit != d_parentStores.end())
+        for (TNode store : lists.d_parents)
         {
-          for (TNode store : pit->second)
-          {
-            consider(read.index, store[1]);
-          }
+          consider(read.index, store[1]);
         }
       }
     }
@@ -507,13 +504,57 @@ void AextArraySolver::undoToMark()
         break;
       case UndoRecord::WALKED_ADDED: d_checkAccessCache.erase(u.d_a); break;
       case UndoRecord::WALKED_REMOVED: d_checkAccessCache.insert(u.d_a); break;
-      case UndoRecord::GATE_OPENED: d_gateOpened.erase(u.d_a); break;
+      case UndoRecord::GATE_OPENED: d_activeArrays.erase(u.d_a); break;
+      case UndoRecord::STORE_LISTED:
+        d_classLists[u.d_a].d_stores.pop_back();
+        break;
+      case UndoRecord::CONST_ARRAY_LISTED:
+        d_classLists[u.d_a].d_constArrays.pop_back();
+        break;
+      case UndoRecord::PARENT_LISTED:
+        d_classLists[u.d_a].d_parents.pop_back();
+        break;
+      case UndoRecord::READ_LISTED:
+        d_classLists[u.d_a].d_reads.pop_back();
+        break;
+      case UndoRecord::INDEX_READ_LISTED:
+        d_classLists[u.d_a].d_indexReads.pop_back();
+        break;
+
+      case UndoRecord::LISTS_MOVED:
+      {
+        // The moved elements are the last ones of each list of d_b: anything
+        // appended after the move has been undone already.
+        const UndoMove& m = d_undoMoves.back();
+        ClassLists& into = d_classLists[u.d_b];
+        ClassLists& from = d_classLists[u.d_a];
+        auto moveBack = [](std::vector<TNode>& src,
+                           std::vector<TNode>& dst,
+                           size_t n) {
+          Assert(src.size() >= n && dst.empty());
+          dst.assign(src.end() - n, src.end());
+          src.resize(src.size() - n);
+        };
+        moveBack(into.d_stores, from.d_stores, m.d_stores);
+        moveBack(into.d_constArrays, from.d_constArrays, m.d_constArrays);
+        moveBack(into.d_parents, from.d_parents, m.d_parents);
+        moveBack(into.d_reads, from.d_reads, m.d_reads);
+        moveBack(into.d_indexReads, from.d_indexReads, m.d_indexReads);
+
+        d_undoMoves.pop_back();
+        break;
+      }
       case UndoRecord::COUNTERS:
       {
         const UndoCounters& c = d_undoCounters.back();
         d_numSelectsDone = c.d_selects;
         d_numStoresDone = c.d_stores;
         d_numMergesDone = c.d_merges;
+        d_listSelectsDone = c.d_listSelects;
+        d_listStoresDone = c.d_listStores;
+        d_listConstArraysDone = c.d_listConstArrays;
+        d_listMergesDone = c.d_listMerges;
+
         d_undoCounters.pop_back();
         break;
       }
@@ -552,18 +593,24 @@ void AextArraySolver::applyDelta()
   // at is fine: that read had the same index representative, so it is walked
   // again too.
   std::vector<TNode> redo;
-  if (!merged.empty())
+  for (TNode m : merged)
   {
-    for (size_t i = 0; i < d_numSelectsDone; ++i)
+    for (TNode sel : classListsOf(m).d_indexReads)
     {
-      TNode sel = d_selects[i];
-      if (d_ee->hasTerm(sel) && merged.count(d_ee->getRepresentative(sel[1]))
-          && unmarkWalked(sel))
+      if (unmarkWalked(sel))
       {
         redo.push_back(sel);
       }
     }
   }
+  // Walk them again in the order they were registered, as a walk from
+  // scratch would: which read gets to a slot first decides which is recorded
+  // there, and so which lemmas are sent. The order of the index lists, which
+  // is the order merges concatenated them in, costs a fifth more time on
+  // QF_ABV/dwp_formulas.
+  std::sort(redo.begin(), redo.end(), [this](TNode a, TNode b) {
+    return d_selectOrder.at(a) < d_selectOrder.at(b);
+  });
   if (!redo.empty())
   {
     std::vector<std::pair<TNode, TNode>> drop;
@@ -639,16 +686,13 @@ void AextArraySolver::applyDelta()
     }
   }
 
-  // The RowU gate only opens along a context path. A representative it has
-  // opened at since the last check has new RowU edges.
-  for (TNode a : d_activeArrays)
+  // The RowU gate only opens along a context path. A class it has opened at
+  // since the last check has new RowU edges.
+  for (TNode a : d_gateOpenedNow)
   {
-    if (d_gateOpened.insert(a).second)
-    {
-      d_undoLog.push_back({UndoRecord::GATE_OPENED, a, Node(), Node()});
-      dirty.insert(a);
-    }
+    dirty.insert(d_ee->getRepresentative(a));
   }
+  d_gateOpenedNow.clear();
 
   // Resume every read recorded at a changed class from there: it may now meet
   // stores, a constant array or parents that were not in its class, and edges
@@ -822,78 +866,167 @@ void AextArraySolver::checkIncrementalState()
                         << slotCount(models) << " slots)" << std::endl;
 }
 
-void AextArraySolver::buildParentMap()
+const AextArraySolver::ClassLists& AextArraySolver::classListsOf(
+    TNode rep) const
 {
-  d_parentStores.clear();
-  for (size_t i = 0, sz = d_stores.size(); i < sz; ++i)
+  static const ClassLists s_none;
+  auto it = d_classLists.find(rep);
+  return it == d_classLists.end() ? s_none : it->second;
+}
+
+void AextArraySolver::addToClassList(TNode rep,
+                                     UndoRecord::Kind which,
+                                     TNode term)
+{
+  ClassLists& lists = d_classLists[rep];
+  switch (which)
   {
-    TNode store = d_stores[i];
-    if (!d_ee->hasTerm(store))
+    case UndoRecord::STORE_LISTED: lists.d_stores.push_back(term); break;
+    case UndoRecord::CONST_ARRAY_LISTED:
+      lists.d_constArrays.push_back(term);
+      break;
+    case UndoRecord::PARENT_LISTED: lists.d_parents.push_back(term); break;
+    case UndoRecord::READ_LISTED: lists.d_reads.push_back(term); break;
+    case UndoRecord::INDEX_READ_LISTED:
+      lists.d_indexReads.push_back(term);
+      break;
+
+    default: Unreachable();
+  }
+  d_undoLog.push_back({which, rep, Node(), Node()});
+}
+
+void AextArraySolver::updateClassLists()
+{
+  // Terms registered since. Each goes to the lists of the classes it is in
+  // now, so it does not matter whether a merge queued below moved one.
+  for (size_t sz = d_stores.size(); d_listStoresDone < sz; ++d_listStoresDone)
+  {
+    TNode store = d_stores[d_listStoresDone];
+    if (d_ee->hasTerm(store))
+    {
+      addToClassList(
+          d_ee->getRepresentative(store), UndoRecord::STORE_LISTED, store);
+      addToClassList(
+          d_ee->getRepresentative(store[0]), UndoRecord::PARENT_LISTED, store);
+      // A new store is alone in its class until a merge (queued below, if
+      // any) says otherwise, so it seeds nothing; but if its class is
+      // already one the gate is open at, the gate opens at its base too.
+      if (d_activeArrays.count(d_ee->getRepresentative(store)))
+      {
+        openGate(d_ee->getRepresentative(store[0]));
+      }
+    }
+  }
+  for (size_t sz = d_constArrays.size(); d_listConstArraysDone < sz;
+       ++d_listConstArraysDone)
+  {
+    TNode c = d_constArrays[d_listConstArraysDone];
+    if (d_ee->hasTerm(c))
+    {
+      addToClassList(
+          d_ee->getRepresentative(c), UndoRecord::CONST_ARRAY_LISTED, c);
+    }
+  }
+  for (size_t sz = d_selects.size(); d_listSelectsDone < sz;
+       ++d_listSelectsDone)
+  {
+    TNode read = d_selects[d_listSelectsDone];
+    if (d_ee->hasTerm(read))
+    {
+      TNode arrayRep = d_ee->getRepresentative(read[0]);
+      TNode indexRep = d_ee->getRepresentative(read[1]);
+      addToClassList(arrayRep, UndoRecord::READ_LISTED, read);
+      addToClassList(indexRep, UndoRecord::INDEX_READ_LISTED, read);
+    }
+  }
+  // Merges since: the lists of a class that lost go to the class it joined,
+  // which is its representative now even if that has merged further.
+  for (size_t sz = d_mergeQueue.size(); d_listMergesDone < sz;
+       ++d_listMergesDone)
+  {
+    TNode b = d_mergeQueue[d_listMergesDone];
+    TNode r = d_ee->getRepresentative(b);
+    if (r == b)
     {
       continue;
     }
-    TNode baseRep = d_ee->getRepresentative(store[0]);
-    d_parentStores[baseRep].push_back(store);
+    auto it = d_classLists.find(b);
+    std::vector<TNode> movedStores;
+    if (it != d_classLists.end())
+    {
+      ClassLists moved = std::move(it->second);
+      d_classLists.erase(it);
+      movedStores = moved.d_stores;
+      ClassLists& dst = d_classLists[r];
+      d_undoMoves.push_back({moved.d_stores.size(),
+                             moved.d_constArrays.size(),
+                             moved.d_parents.size(),
+                             moved.d_reads.size(),
+                             moved.d_indexReads.size()});
+      auto append = [](std::vector<TNode>& d, const std::vector<TNode>& src) {
+        d.insert(d.end(), src.begin(), src.end());
+      };
+      append(dst.d_stores, moved.d_stores);
+      append(dst.d_constArrays, moved.d_constArrays);
+      append(dst.d_parents, moved.d_parents);
+      append(dst.d_reads, moved.d_reads);
+      append(dst.d_indexReads, moved.d_indexReads);
+      d_undoLog.push_back({UndoRecord::LISTS_MOVED, b, r, Node()});
+    }
+    if (b.getType().isArray())
+    {
+      updateGateOnMerge(b, r, movedStores);
+    }
   }
 }
 
-/**
- * Compute the representatives from which RowU is allowed (see the invariant
- * documented on d_activeArrays in the header).
- *
- * The set is: every representative of a STORE term whose equivalence class has
- * more than one member, closed downwards through store bases.
- */
-void AextArraySolver::computeActiveArrays()
+void AextArraySolver::openGate(TNode arrayRep)
 {
-  d_activeArrays.clear();
-  std::vector<TNode> worklist;
-
-  // Seed: find store reps whose EQ class has > 1 member.
-  std::unordered_set<TNode> checked;
-  for (size_t i = 0, sz = d_stores.size(); i < sz; ++i)
-  {
-    TNode store = d_stores[i];
-    if (!d_ee->hasTerm(store))
-    {
-      continue;
-    }
-    TNode rep = d_ee->getRepresentative(store);
-    if (!checked.insert(rep).second)
-    {
-      continue;
-    }
-
-    eq::EqClassIterator eqi(rep, d_ee);
-    ++eqi;  // skip first
-    if (!eqi.isFinished())
-    {
-      d_activeArrays.insert(rep);
-      worklist.push_back(rep);
-    }
-  }
-
-  // Propagate downward: mark store bases as active.
+  // The gate's closure: open at a class, it is open at the base of every
+  // store in it.
+  std::vector<TNode> worklist{arrayRep};
   while (!worklist.empty())
   {
     TNode rep = worklist.back();
     worklist.pop_back();
-    eq::EqClassIterator eqi(rep, d_ee);
-    while (!eqi.isFinished())
+    if (!d_activeArrays.insert(rep).second)
     {
-      TNode n = *eqi;
-      if (n.getKind() == Kind::STORE)
-      {
-        TNode baseRep = d_ee->getRepresentative(n[0]);
-        if (d_activeArrays.insert(baseRep).second)
-        {
-          worklist.push_back(baseRep);
-        }
-      }
-      ++eqi;
+      continue;
+    }
+    d_undoLog.push_back({UndoRecord::GATE_OPENED, rep, Node(), Node()});
+    d_gateOpenedNow.push_back(rep);
+    for (TNode n : classListsOf(rep).d_stores)
+    {
+      worklist.push_back(d_ee->getRepresentative(n[0]));
     }
   }
+}
 
+void AextArraySolver::updateGateOnMerge(TNode loser,
+                                        TNode winner,
+                                        const std::vector<TNode>& movedStores)
+{
+  // The merged class contains the loser's, so wherever the gate was open for
+  // the loser's class it is for the merged one. The merged class has more
+  // than one member, so if it holds a store it seeds the gate. And if the
+  // gate is open there, it is open at the bases of the stores that joined.
+  if (d_activeArrays.count(winner))
+  {
+    for (TNode n : movedStores)
+    {
+      openGate(d_ee->getRepresentative(n[0]));
+    }
+  }
+  else if (d_activeArrays.count(loser)
+           || !classListsOf(winner).d_stores.empty())
+  {
+    openGate(winner);
+  }
+}
+
+void AextArraySolver::checkGatePrecondition()
+{
 #ifdef CVC5_ASSERTIONS
   // Check the structural fact the whole gate rests on: if a store's base is
   // excluded, that store is alone in its class. Everything the invariant on
@@ -902,11 +1035,12 @@ void AextArraySolver::computeActiveArrays()
   // present -- is a case analysis over a singleton parent class, and says
   // nothing once the class has a second member.
   //
-  // The seed and the closure above are what establish it, and they are easy
-  // to perturb: seeding from something other than "class size > 1", or
-  // closing over anything narrower than every STORE in the class, breaks it
-  // without breaking any test, and the symptom is a wrong "sat". Assert it
-  // directly rather than trusting the reader to re-derive it.
+  // The seed and the closure in openGate and updateGateOnMerge are what
+  // establish it, and they are easy to perturb: seeding from something other
+  // than "class size > 1", or closing over anything narrower than every
+  // STORE in the class, breaks it without breaking any test, and the symptom
+  // is a wrong "sat". Assert it directly rather than trusting the reader to
+  // re-derive it.
   for (size_t i = 0, sz = d_stores.size(); i < sz; ++i)
   {
     TNode store = d_stores[i];
@@ -1051,90 +1185,78 @@ void AextArraySolver::propagateFrom(TNode select,
       // O(N^2) work per propagation step at arrays with many reads.
     }
 
+    const ClassLists& lists = classListsOf(arrayRep);
+
     // Step 2: Check for AccessStore (matching index by representative).
+    for (TNode n : lists.d_stores)
     {
-      eq::EqClassIterator eqi(arrayRep, d_ee);
-      while (!eqi.isFinished())
+      if (d_ee->getRepresentative(n[1]) != indexRep)
       {
-        TNode n = *eqi;
-        if (n.getKind() == Kind::STORE)
-        {
-          TNode storeIndexRep = d_ee->getRepresentative(n[1]);
-          if (indexRep == storeIndexRep)
-          {
-            if (!d_ee->areEqual(select, n[2]))
-            {
-              if (d_inShadowRebuild)
-              {
-                d_shadowObligations.emplace_back(select, n[2]);
-                break;
-              }
-              Node conc = select.eqNode(n[2]);
-              std::vector<Node> expVec;
-              std::vector<std::vector<PathEdge>> paths(1);
-              // The caller-added `entryArray = n` below is strictly stronger
-              // than `entryArray = arrayRep`, so skip the latter.
-              TNode entryArray = findPathConditions(
-                  select, arrayRep, expVec, &paths[0], false);
-              if (entryArray.isNull())
-              {
-                break;
-              }
-              if (index != n[1])
-              {
-                expVec.push_back(index.eqNode(n[1]));
-              }
-              if (entryArray != n)
-              {
-                expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
-              }
-              Node reason = nm->mkAnd(expVec);
-              Trace("arrays::aext")
-                  << "AccessStore: entryArray=" << entryArray << " store=" << n
-                  << " reason=" << reason << " => " << conc << std::endl;
-              recordJoin(select, n[2], reason);
-              d_im.arrayLemma(conc,
-                              InferenceId::ARRAYS_AEXT_ROW,
-                              reason,
-                              ProofRule::ARRAYS_READ_OVER_WRITE,
-                              std::move(paths));
-              ++d_numAccessStoreLemmas;
-            }
-            break;
-          }
-        }
-        ++eqi;
+        continue;
       }
+      if (!d_ee->areEqual(select, n[2]))
+      {
+        if (d_inShadowRebuild)
+        {
+          d_shadowObligations.emplace_back(select, n[2]);
+          break;
+        }
+        Node conc = select.eqNode(n[2]);
+        std::vector<Node> expVec;
+        std::vector<std::vector<PathEdge>> paths(1);
+        // The caller-added `entryArray = n` below is strictly stronger than
+        // `entryArray = arrayRep`, so skip the latter.
+        TNode entryArray =
+            findPathConditions(select, arrayRep, expVec, &paths[0], false);
+        if (entryArray.isNull())
+        {
+          break;
+        }
+        if (index != n[1])
+        {
+          expVec.push_back(index.eqNode(n[1]));
+        }
+        if (entryArray != n)
+        {
+          expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
+        }
+        Node reason = nm->mkAnd(expVec);
+        Trace("arrays::aext")
+            << "AccessStore: entryArray=" << entryArray << " store=" << n
+            << " reason=" << reason << " => " << conc << std::endl;
+        recordJoin(select, n[2], reason);
+        d_im.arrayLemma(conc,
+                        InferenceId::ARRAYS_AEXT_ROW,
+                        reason,
+                        ProofRule::ARRAYS_READ_OVER_WRITE,
+                        std::move(paths));
+        ++d_numAccessStoreLemmas;
+      }
+      break;
     }
 
     // Step 2b: Check for AccessConstArray (STORE_ALL in EQ class).
+    if (!lists.d_constArrays.empty())
     {
-      eq::EqClassIterator eqca(arrayRep, d_ee);
-      while (!eqca.isFinished())
+      TNode n = lists.d_constArrays[0];
+      Node defValue = n.getConst<ArrayStoreAll>().getValue();
+      if (!d_ee->hasTerm(defValue) || !d_ee->areEqual(select, defValue))
       {
-        TNode n = *eqca;
-        if (n.getKind() == Kind::STORE_ALL)
+        if (d_inShadowRebuild)
         {
-          ArrayStoreAll storeAll = n.getConst<ArrayStoreAll>();
-          Node defValue = storeAll.getValue();
-          if (!d_ee->hasTerm(defValue) || !d_ee->areEqual(select, defValue))
+          d_shadowObligations.emplace_back(select, defValue);
+        }
+        else
+        {
+          Node conc = select.eqNode(defValue);
+          std::vector<Node> expVec;
+          std::vector<std::vector<PathEdge>> paths(1);
+          // As in AccessStore: `entryArray = n` below subsumes the rep
+          // equality, so do not emit it.
+          TNode entryArray =
+              findPathConditions(select, arrayRep, expVec, &paths[0], false);
+          if (!entryArray.isNull())
           {
-            if (d_inShadowRebuild)
-            {
-              d_shadowObligations.emplace_back(select, defValue);
-              break;
-            }
-            Node conc = select.eqNode(defValue);
-            std::vector<Node> expVec;
-            std::vector<std::vector<PathEdge>> paths(1);
-            // As in AccessStore: `entryArray = n` below subsumes the rep
-            // equality, so do not emit it.
-            TNode entryArray =
-                findPathConditions(select, arrayRep, expVec, &paths[0], false);
-            if (entryArray.isNull())
-            {
-              break;
-            }
             if (entryArray != n)
             {
               expVec.push_back(entryArray.eqNode(static_cast<Node>(n)));
@@ -1150,44 +1272,32 @@ void AextArraySolver::propagateFrom(TNode select,
                             std::move(paths));
             ++d_numConstArrayLemmas;
           }
-          break;
         }
-        ++eqca;
       }
     }
 
     // Step 3: RowD -- propagate downward through stores
+    for (TNode n : lists.d_stores)
     {
-      eq::EqClassIterator eqi2(arrayRep, d_ee);
-      while (!eqi2.isFinished())
+      if (d_ee->getRepresentative(n[1]) != indexRep)
       {
-        TNode n = *eqi2;
-        if (n.getKind() == Kind::STORE
-            && d_ee->getRepresentative(n[1]) != indexRep)
-        {
-          Trace("arrays::aext") << "  RowD push: " << n[0] << std::endl;
-          visit.push_back(n[0]);
-          ++d_numPropagationsDown;
-        }
-        ++eqi2;
+        Trace("arrays::aext") << "  RowD push: " << n[0] << std::endl;
+        visit.push_back(n[0]);
+        ++d_numPropagationsDown;
       }
     }
 
     // Step 4: RowU -- propagate upward through parent stores.
     if (d_activeArrays.count(arrayRep))
     {
-      auto pit = d_parentStores.find(arrayRep);
-      if (pit != d_parentStores.end())
+      for (TNode store : lists.d_parents)
       {
-        for (TNode store : pit->second)
+        TNode storeIndexRep = d_ee->getRepresentative(store[1]);
+        if (indexRep != storeIndexRep)
         {
-          TNode storeIndexRep = d_ee->getRepresentative(store[1]);
-          if (indexRep != storeIndexRep)
-          {
-            Trace("arrays::aext") << "  RowU push: " << store << std::endl;
-            visit.push_back(store);
-            ++d_numPropagationsUp;
-          }
+          Trace("arrays::aext") << "  RowU push: " << store << std::endl;
+          visit.push_back(store);
+          ++d_numPropagationsUp;
         }
       }
     }
@@ -1245,30 +1355,24 @@ TNode AextArraySolver::findPathConditions(TNode select,
     TNode arrayRep = queue.front();
     queue.pop_front();
 
+    const ClassLists& lists = classListsOf(arrayRep);
+
     // RowD
+    for (TNode n : lists.d_stores)
     {
-      eq::EqClassIterator eqi(arrayRep, d_ee);
-      while (!eqi.isFinished() && !found)
+      if (d_ee->getRepresentative(n[1]) != indexRep)
       {
-        TNode n = *eqi;
-        if (n.getKind() == Kind::STORE
-            && d_ee->getRepresentative(n[1]) != indexRep)
+        TNode childRep = d_ee->getRepresentative(n[0]);
+        if (bfsEdges.find(childRep) == bfsEdges.end())
         {
-          TNode childRep = d_ee->getRepresentative(n[0]);
-          if (bfsEdges.find(childRep) == bfsEdges.end())
+          bfsEdges[childRep] = {n[0], n, arrayRep, false};
+          if (childRep == targetRep)
           {
-            bfsEdges[childRep] = {n[0], n, arrayRep, false};
-            if (childRep == targetRep)
-            {
-              found = true;
-            }
-            else
-            {
-              queue.push_back(childRep);
-            }
+            found = true;
+            break;
           }
+          queue.push_back(childRep);
         }
-        ++eqi;
       }
     }
 
@@ -1278,26 +1382,20 @@ TNode AextArraySolver::findPathConditions(TNode select,
     }
 
     // RowU
+    for (TNode store : lists.d_parents)
     {
-      auto pit = d_parentStores.find(arrayRep);
-      if (pit != d_parentStores.end())
+      if (d_ee->getRepresentative(store[1]) != indexRep)
       {
-        for (TNode store : pit->second)
+        TNode storeRep = d_ee->getRepresentative(store);
+        if (bfsEdges.find(storeRep) == bfsEdges.end())
         {
-          if (d_ee->getRepresentative(store[1]) != indexRep)
+          bfsEdges[storeRep] = {store, store, arrayRep, true};
+          if (storeRep == targetRep)
           {
-            TNode storeRep = d_ee->getRepresentative(store);
-            if (bfsEdges.find(storeRep) == bfsEdges.end())
-            {
-              bfsEdges[storeRep] = {store, store, arrayRep, true};
-              if (storeRep == targetRep)
-              {
-                found = true;
-                break;
-              }
-              queue.push_back(storeRep);
-            }
+            found = true;
+            break;
           }
+          queue.push_back(storeRep);
         }
       }
     }
@@ -1407,8 +1505,6 @@ TNode AextArraySolver::findPathConditions(TNode select,
 
 void AextArraySolver::propagateRIntro2()
 {
-  NodeManager* nm = nodeManager();
-
   // Build readsByArray[arrayRep][indexRep] -> existing select.
   std::unordered_map<TNode, std::unordered_map<TNode, TNode>> readsByArray;
   for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
@@ -1426,7 +1522,6 @@ void AextArraySolver::propagateRIntro2()
     if (d_state.isInConflict()) return;
     TNode store = d_stores[si];
     if (!d_ee->hasTerm(store)) continue;
-    TNode k = store[1];
     TNode storeRep = d_ee->getRepresentative(store);
     TNode baseRep = d_ee->getRepresentative(store[0]);
 
@@ -1441,58 +1536,60 @@ void AextArraySolver::propagateRIntro2()
     for (const auto& [jRep, rN] : storeIt->second)
     {
       if (d_state.isInConflict()) return;
-      if (d_ee->getRepresentative(k) == jRep) continue;
-
       auto rit = baseIt->second.find(jRep);
-      if (rit == baseIt->second.end()) continue;
-      TNode rC = rit->second;
-      if (rN == rC || d_ee->areEqual(rN, rC)) continue;
-
-      TNode j = rN[1];
-
-      if (d_ee->areDisequal(j, k, true))
+      if (rit != baseIt->second.end())
       {
-        Node eq = rN.eqNode(rC);
-        // Keyed on the conclusion alone, unlike CongR: this inference also
-        // asserts eq as an internal fact below, and an equality engine
-        // assertion can only be undone by popping the context that this cache
-        // lives in. So whenever the cache suppresses a re-derivation, eq still
-        // holds; there is nothing for a second guard to add.
-        if (!d_rintro2LemmaCache.insert(eq))
-        {
-          continue;
-        }
-        std::vector<Node> expVec;
-        if (rN[0] != store)
-        {
-          expVec.push_back(rN[0].eqNode(static_cast<Node>(store)));
-        }
-        if (rC[0] != store[0])
-        {
-          expVec.push_back(rC[0].eqNode(store[0]));
-        }
-        if (rC[1] != j)
-        {
-          expVec.push_back(rC[1].eqNode(j));
-        }
-        expVec.push_back(j.eqNode(k).notNode());
-        Node reason = nm->mkAnd(expVec);
-        Trace("arrays::aext")
-            << "RIntro2: " << reason << " => " << eq << std::endl;
-        d_im.arrayLemma(eq,
-                        InferenceId::ARRAYS_AEXT_RINTRO2,
-                        reason,
-                        ProofRule::ARRAYS_READ_OVER_WRITE);
-        d_im.assertInference(eq,
-                             true,
-                             InferenceId::ARRAYS_AEXT_RINTRO2,
-                             reason,
-                             ProofRule::ARRAYS_READ_OVER_WRITE);
-        ++d_numRIntro2Propagations;
-        continue;
+        fireRIntro2(store, rN, rit->second);
       }
     }
   }
+}
+
+void AextArraySolver::fireRIntro2(TNode store, TNode rN, TNode rC)
+{
+  TNode k = store[1];
+  TNode j = rN[1];
+  if (d_ee->getRepresentative(k) == d_ee->getRepresentative(j) || rN == rC
+      || d_ee->areEqual(rN, rC) || !d_ee->areDisequal(j, k, true))
+  {
+    return;
+  }
+  Node eq = rN.eqNode(rC);
+  // Keyed on the conclusion alone, unlike CongR: this inference also asserts
+  // eq as an internal fact below, and an equality engine assertion can only
+  // be undone by popping the context that this cache lives in. So whenever
+  // the cache suppresses a re-derivation, eq still holds; there is nothing
+  // for a second guard to add.
+  if (!d_rintro2LemmaCache.insert(eq))
+  {
+    return;
+  }
+  std::vector<Node> expVec;
+  if (rN[0] != store)
+  {
+    expVec.push_back(rN[0].eqNode(static_cast<Node>(store)));
+  }
+  if (rC[0] != store[0])
+  {
+    expVec.push_back(rC[0].eqNode(store[0]));
+  }
+  if (rC[1] != j)
+  {
+    expVec.push_back(rC[1].eqNode(j));
+  }
+  expVec.push_back(j.eqNode(k).notNode());
+  Node reason = nodeManager()->mkAnd(expVec);
+  Trace("arrays::aext") << "RIntro2: " << reason << " => " << eq << std::endl;
+  d_im.arrayLemma(eq,
+                  InferenceId::ARRAYS_AEXT_RINTRO2,
+                  reason,
+                  ProofRule::ARRAYS_READ_OVER_WRITE);
+  d_im.assertInference(eq,
+                       true,
+                       InferenceId::ARRAYS_AEXT_RINTRO2,
+                       reason,
+                       ProofRule::ARRAYS_READ_OVER_WRITE);
+  ++d_numRIntro2Propagations;
 }
 
 void AextArraySolver::checkDisequalities()
