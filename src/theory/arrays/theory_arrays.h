@@ -230,10 +230,11 @@ class TheoryArrays : public Theory
         d_arrays.d_internal->eqNotifyMergeNonArray(t1, t2);
       }
     }
-    void eqNotifyDisequal(CVC5_UNUSED TNode t1,
-                          CVC5_UNUSED TNode t2,
+    void eqNotifyDisequal(TNode t1,
+                          TNode t2,
                           CVC5_UNUSED TNode reason) override
     {
+      d_arrays.d_internal->eqNotifyDisequal(t1, t2);
     }
   };
 

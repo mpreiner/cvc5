@@ -53,6 +53,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_indexSplitCache(userContext()),
       d_undoMark(context(), 0),
       d_mergeQueue(context()),
+      d_disequalityQueue(context()),
       d_numCongruenceLemmas(statisticsRegistry().registerInt(
           "theory::arrays::aext::numCongruenceLemmas")),
       d_numAccessStoreLemmas(statisticsRegistry().registerInt(
@@ -148,6 +149,11 @@ void AextArraySolver::eqNotifyMerge(TNode a, TNode b)
 void AextArraySolver::eqNotifyMergeNonArray(TNode /*a*/, TNode b)
 {
   d_mergeQueue.push_back(b);
+}
+
+void AextArraySolver::eqNotifyDisequal(TNode a, TNode b)
+{
+  d_disequalityQueue.push_back({a, b});
 }
 
 void AextArraySolver::mergeArraysModelOnly(TNode a, TNode b)
@@ -283,7 +289,8 @@ void AextArraySolver::check(Theory::Effort level)
                             d_listSelectsDone,
                             d_listStoresDone,
                             d_listConstArraysDone,
-                            d_listMergesDone});
+                            d_listMergesDone,
+                            d_listDisequalitiesDone});
   d_undoLog.push_back({UndoRecord::COUNTERS, Node(), Node(), Node()});
 
   // RIntro2 theory propagation. This runs before the class lists and the gate
@@ -297,16 +304,24 @@ void AextArraySolver::check(Theory::Effort level)
   // moved the equality engine.) For the same reason it runs before
   // applyDelta: the merges it causes are queued like any other, and handled
   // with them.
-  propagateRIntro2();
-  // Everything below assumes a consistent equality engine -- EqClassIterator,
-  // for one, requires it -- so bail out if RIntro2 derived a conflict.
-  // Nothing is stamped on this path, so the next check() undoes what this one
-  // recorded and redoes it.
-  if (d_state.isInConflict())
+  //
+  // It only looks at what changed since the last check (see
+  // updateClassLists), and the facts it asserts are changes too, so it runs
+  // interleaved with bringing the class lists up to date until neither has
+  // anything left to do.
+  do
   {
-    return;
-  }
-  updateClassLists();
+    updateClassLists();
+    propagateRIntro2();
+    // Everything below assumes a consistent equality engine --
+    // EqClassIterator, for one, requires it -- so bail out if RIntro2
+    // derived a conflict. Nothing is stamped on this path, so the next
+    // check() undoes what this one recorded and redoes it.
+    if (d_state.isInConflict())
+    {
+      return;
+    }
+  } while (d_listMergesDone < d_mergeQueue.size());
   checkGatePrecondition();
 
   applyDelta();
@@ -332,6 +347,7 @@ void AextArraySolver::check(Theory::Effort level)
     if (options().arrays.arraysAextCheckIncremental)
     {
       checkIncrementalState();
+      checkRIntro2Complete();
     }
   }
 
@@ -520,7 +536,9 @@ void AextArraySolver::undoToMark()
       case UndoRecord::INDEX_READ_LISTED:
         d_classLists[u.d_a].d_indexReads.pop_back();
         break;
-
+      case UndoRecord::INDEX_STORE_LISTED:
+        d_classLists[u.d_a].d_indexStores.pop_back();
+        break;
       case UndoRecord::LISTS_MOVED:
       {
         // The moved elements are the last ones of each list of d_b: anything
@@ -540,7 +558,7 @@ void AextArraySolver::undoToMark()
         moveBack(into.d_parents, from.d_parents, m.d_parents);
         moveBack(into.d_reads, from.d_reads, m.d_reads);
         moveBack(into.d_indexReads, from.d_indexReads, m.d_indexReads);
-
+        moveBack(into.d_indexStores, from.d_indexStores, m.d_indexStores);
         d_undoMoves.pop_back();
         break;
       }
@@ -554,7 +572,7 @@ void AextArraySolver::undoToMark()
         d_listStoresDone = c.d_listStores;
         d_listConstArraysDone = c.d_listConstArrays;
         d_listMergesDone = c.d_listMerges;
-
+        d_listDisequalitiesDone = c.d_listDisequalities;
         d_undoCounters.pop_back();
         break;
       }
@@ -890,7 +908,9 @@ void AextArraySolver::addToClassList(TNode rep,
     case UndoRecord::INDEX_READ_LISTED:
       lists.d_indexReads.push_back(term);
       break;
-
+    case UndoRecord::INDEX_STORE_LISTED:
+      lists.d_indexStores.push_back(term);
+      break;
     default: Unreachable();
   }
   d_undoLog.push_back({which, rep, Node(), Node()});
@@ -898,6 +918,32 @@ void AextArraySolver::addToClassList(TNode rep,
 
 void AextArraySolver::updateClassLists()
 {
+  // Along with the lists, collect the RIntro2 instances that the changes
+  // applied here may have made true (see propagateRIntro2). An instance is a
+  // store s, a read rN whose array is in the class of s and a read rC whose
+  // array is in the class of s[0], at one index class J; each change below
+  // names the stores whose instances it touches, and the index class they
+  // are touched at, or all of them.
+  auto instances = [&](TNode store, TNode indexRep) {
+    if (d_ri2Queued.emplace(store, indexRep).second)
+    {
+      d_ri2Todo.emplace_back(store, indexRep);
+    }
+  };
+  // Every store with an end in the class of arrayRep: it is in it, or its
+  // base is.
+  auto instancesAt = [&](TNode arrayRep, TNode indexRep) {
+    const ClassLists& lists = classListsOf(arrayRep);
+    for (TNode s : lists.d_stores)
+    {
+      instances(s, indexRep);
+    }
+    for (TNode s : lists.d_parents)
+    {
+      instances(s, indexRep);
+    }
+  };
+
   // Terms registered since. Each goes to the lists of the classes it is in
   // now, so it does not matter whether a merge queued below moved one.
   for (size_t sz = d_stores.size(); d_listStoresDone < sz; ++d_listStoresDone)
@@ -909,6 +955,10 @@ void AextArraySolver::updateClassLists()
           d_ee->getRepresentative(store), UndoRecord::STORE_LISTED, store);
       addToClassList(
           d_ee->getRepresentative(store[0]), UndoRecord::PARENT_LISTED, store);
+      addToClassList(d_ee->getRepresentative(store[1]),
+                     UndoRecord::INDEX_STORE_LISTED,
+                     store);
+      instances(store, TNode());
       // A new store is alone in its class until a merge (queued below, if
       // any) says otherwise, so it seeds nothing; but if its class is
       // already one the gate is open at, the gate opens at its base too.
@@ -938,6 +988,7 @@ void AextArraySolver::updateClassLists()
       TNode indexRep = d_ee->getRepresentative(read[1]);
       addToClassList(arrayRep, UndoRecord::READ_LISTED, read);
       addToClassList(indexRep, UndoRecord::INDEX_READ_LISTED, read);
+      instancesAt(arrayRep, indexRep);
     }
   }
   // Merges since: the lists of a class that lost go to the class it joined,
@@ -952,18 +1003,74 @@ void AextArraySolver::updateClassLists()
       continue;
     }
     auto it = d_classLists.find(b);
-    std::vector<TNode> movedStores;
+    const ClassLists& from = classListsOf(b);
+    const ClassLists& into = classListsOf(r);
+    // RIntro2 instances with a store on one side of the merge and a read on
+    // the other are new. With the loser's stores, that is all their
+    // instances; with the winner's, those at the index classes of the
+    // loser's reads.
+    for (TNode s : from.d_stores)
+    {
+      instances(s, TNode());
+    }
+    for (TNode s : from.d_parents)
+    {
+      instances(s, TNode());
+    }
+    if (!from.d_reads.empty())
+    {
+      std::unordered_set<TNode> indexReps;
+      for (TNode read : from.d_reads)
+      {
+        indexReps.insert(d_ee->getRepresentative(read[1]));
+      }
+      for (TNode j : indexReps)
+      {
+        for (TNode s : into.d_stores)
+        {
+          instances(s, j);
+        }
+        for (TNode s : into.d_parents)
+        {
+          instances(s, j);
+        }
+      }
+    }
+    // As an index class: every read and every store indexed in the merged
+    // class, on either side, is at an index class that may now be separated
+    // from ones it was not separated from before -- the other side's
+    // disequalities, or a constant the other side brings, now apply to it --
+    // and the loser's reads also share an index class with the winner's.
+    // That holds even if nothing is indexed in the loser's class: a
+    // disequality with any of its members is enough.
+    for (const std::vector<TNode>* reads :
+         {&from.d_indexReads, &into.d_indexReads})
+    {
+      for (TNode read : *reads)
+      {
+        instancesAt(d_ee->getRepresentative(read[0]), r);
+      }
+    }
+    for (const std::vector<TNode>* stores :
+         {&from.d_indexStores, &into.d_indexStores})
+    {
+      for (TNode s : *stores)
+      {
+        instances(s, TNode());
+      }
+    }
+    std::vector<TNode> movedStores = from.d_stores;
     if (it != d_classLists.end())
     {
       ClassLists moved = std::move(it->second);
       d_classLists.erase(it);
-      movedStores = moved.d_stores;
       ClassLists& dst = d_classLists[r];
       d_undoMoves.push_back({moved.d_stores.size(),
                              moved.d_constArrays.size(),
                              moved.d_parents.size(),
                              moved.d_reads.size(),
-                             moved.d_indexReads.size()});
+                             moved.d_indexReads.size(),
+                             moved.d_indexStores.size()});
       auto append = [](std::vector<TNode>& d, const std::vector<TNode>& src) {
         d.insert(d.end(), src.begin(), src.end());
       };
@@ -972,11 +1079,28 @@ void AextArraySolver::updateClassLists()
       append(dst.d_parents, moved.d_parents);
       append(dst.d_reads, moved.d_reads);
       append(dst.d_indexReads, moved.d_indexReads);
+      append(dst.d_indexStores, moved.d_indexStores);
       d_undoLog.push_back({UndoRecord::LISTS_MOVED, b, r, Node()});
     }
     if (b.getType().isArray())
     {
       updateGateOnMerge(b, r, movedStores);
+    }
+  }
+  // Disequalities since, for the stores indexed on either side.
+  for (size_t sz = d_disequalityQueue.size(); d_listDisequalitiesDone < sz;
+       ++d_listDisequalitiesDone)
+  {
+    const auto& [a, b] = d_disequalityQueue[d_listDisequalitiesDone];
+    TNode ra = d_ee->getRepresentative(a);
+    TNode rb = d_ee->getRepresentative(b);
+    for (TNode s : classListsOf(ra).d_indexStores)
+    {
+      instances(s, rb);
+    }
+    for (TNode s : classListsOf(rb).d_indexStores)
+    {
+      instances(s, ra);
     }
   }
 }
@@ -1505,41 +1629,61 @@ TNode AextArraySolver::findPathConditions(TNode select,
 
 void AextArraySolver::propagateRIntro2()
 {
-  // Build readsByArray[arrayRep][indexRep] -> existing select.
-  std::unordered_map<TNode, std::unordered_map<TNode, TNode>> readsByArray;
-  for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
+  // RIntro2: for a store s = store(b, k, v), a read rN whose array is in the
+  // class of s and a read rC whose array is in the class of b, at the same
+  // index class J other than k's, are equal once j != k is entailed. Only the
+  // instances updateClassLists found touched by a change since the last run
+  // are checked; the others were checked when they last changed, and their
+  // outcome cannot have changed since.
+  std::vector<std::pair<TNode, TNode>> todo;
+  todo.swap(d_ri2Todo);
+  d_ri2Queued.clear();
+  // The reads at each array class, by index class.
+  std::unordered_map<TNode, std::unordered_map<TNode, TNode>> readsAt;
+  auto readsOf = [&](TNode arrayRep)
+      -> const std::unordered_map<TNode, TNode>& {
+    auto [it, inserted] = readsAt.try_emplace(arrayRep);
+    if (inserted)
+    {
+      for (TNode r : classListsOf(arrayRep).d_reads)
+      {
+        it->second[d_ee->getRepresentative(r[1])] = r;
+      }
+    }
+    return it->second;
+  };
+  for (const auto& [store, indexRep] : todo)
   {
-    TNode s = d_selects[i];
-    if (!d_ee->hasTerm(s)) continue;
-    TNode aRep = d_ee->getRepresentative(s[0]);
-    TNode iRep = d_ee->getRepresentative(s[1]);
-    readsByArray[aRep][iRep] = s;
-  }
-
-  // Iterate stores and look for propagation opportunities.
-  for (size_t si = 0, ssz = d_stores.size(); si < ssz; ++si)
-  {
-    if (d_state.isInConflict()) return;
-    TNode store = d_stores[si];
-    if (!d_ee->hasTerm(store)) continue;
+    if (d_state.isInConflict())
+    {
+      return;
+    }
     TNode storeRep = d_ee->getRepresentative(store);
     TNode baseRep = d_ee->getRepresentative(store[0]);
-
-    if (storeRep == baseRep) continue;
-
-    auto storeIt = readsByArray.find(storeRep);
-    if (storeIt == readsByArray.end()) continue;
-
-    auto baseIt = readsByArray.find(baseRep);
-    if (baseIt == readsByArray.end()) continue;
-
-    for (const auto& [jRep, rN] : storeIt->second)
+    if (storeRep == baseRep)
     {
-      if (d_state.isInConflict()) return;
-      auto rit = baseIt->second.find(jRep);
-      if (rit != baseIt->second.end())
+      continue;
+    }
+    const auto& atStore = readsOf(storeRep);
+    const auto& atBase = readsOf(baseRep);
+    if (indexRep.isNull())
+    {
+      for (const auto& [jRep, rN] : atStore)
       {
-        fireRIntro2(store, rN, rit->second);
+        auto rit = atBase.find(jRep);
+        if (rit != atBase.end())
+        {
+          fireRIntro2(store, rN, rit->second);
+        }
+      }
+    }
+    else
+    {
+      auto nit = atStore.find(indexRep);
+      auto rit = atBase.find(indexRep);
+      if (nit != atStore.end() && rit != atBase.end())
+      {
+        fireRIntro2(store, nit->second, rit->second);
       }
     }
   }
@@ -1590,6 +1734,58 @@ void AextArraySolver::fireRIntro2(TNode store, TNode rN, TNode rC)
                        reason,
                        ProofRule::ARRAYS_READ_OVER_WRITE);
   ++d_numRIntro2Propagations;
+}
+
+void AextArraySolver::checkRIntro2Complete()
+{
+  // Every instance a pass over all stores and reads would fire has fired --
+  // unless something has changed since the last run, as DisEq lemmas do by
+  // registering reads; the next check takes care of that.
+  if (d_listSelectsDone < d_selects.size() || d_listStoresDone < d_stores.size()
+      || d_listMergesDone < d_mergeQueue.size()
+      || d_listDisequalitiesDone < d_disequalityQueue.size())
+  {
+    return;
+  }
+  std::unordered_map<TNode, std::unordered_map<TNode, TNode>> readsByArray;
+  for (size_t i = 0, sz = d_selects.size(); i < sz; ++i)
+  {
+    TNode r = d_selects[i];
+    if (d_ee->hasTerm(r))
+    {
+      readsByArray[d_ee->getRepresentative(r[0])]
+                  [d_ee->getRepresentative(r[1])] = r;
+    }
+  }
+  for (size_t si = 0, ssz = d_stores.size(); si < ssz; ++si)
+  {
+    TNode store = d_stores[si];
+    if (!d_ee->hasTerm(store))
+    {
+      continue;
+    }
+    TNode k = store[1];
+    auto sit = readsByArray.find(d_ee->getRepresentative(store));
+    auto bit = readsByArray.find(d_ee->getRepresentative(store[0]));
+    if (sit == readsByArray.end() || bit == readsByArray.end()
+        || sit == bit)
+    {
+      continue;
+    }
+    for (const auto& [jRep, rN] : sit->second)
+    {
+      auto rit = bit->second.find(jRep);
+      if (rit == bit->second.end() || d_ee->getRepresentative(k) == jRep)
+      {
+        continue;
+      }
+      AlwaysAssert(d_ee->areEqual(rN, rit->second)
+                   || !d_ee->areDisequal(rN[1], k, false))
+          << "incremental AEXT check: RIntro2 through " << store
+          << " would equate " << rN << " and " << rit->second
+          << ", which no run derived";
+    }
+  }
 }
 
 void AextArraySolver::checkDisequalities()

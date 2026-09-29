@@ -89,6 +89,7 @@ class AextArraySolver : public ArraySolver
   void preRegisterStoreAll(TNode node) override;
   void eqNotifyMerge(TNode a, TNode b) override;
   void eqNotifyMergeNonArray(TNode a, TNode b) override;
+  void eqNotifyDisequal(TNode a, TNode b) override;
   void postCheck(Theory::Effort level) override;
   void notifyArrayDisequality(TNode a, TNode b, TNode fact) override;
   void computeRelevantTerms(std::set<Node>& termSet) override;
@@ -182,7 +183,8 @@ class AextArraySolver : public ArraySolver
                            std::vector<PathEdge>* edges = nullptr,
                            bool linkEntryToTargetRep = true);
   /**
-   * RIntro2 theory propagation.
+   * RIntro2 theory propagation, over the instances updateClassLists found
+   * touched by what changed since the last run (d_ri2Todo).
    */
   void propagateRIntro2();
   /**
@@ -191,6 +193,18 @@ class AextArraySolver : public ArraySolver
    * store and rC's in the class of store[0], at the same index class.
    */
   void fireRIntro2(TNode store, TNode rN, TNode rC);
+  /**
+   * Under --arrays-aext-check-incremental: fail hard if a pass of RIntro2 over
+   * every store and read would still fire somewhere.
+   */
+  void checkRIntro2Complete();
+  /**
+   * The RIntro2 instances to check, as (store, index class) with a null
+   * index class meaning all of them, and the set of those queued.
+   */
+  std::vector<std::pair<TNode, TNode>> d_ri2Todo;
+  std::unordered_set<std::pair<TNode, TNode>, PairHashFunction<TNode, TNode>>
+      d_ri2Queued;
   /**
    * Process array disequalities (DisEq rule).
    */
@@ -479,6 +493,7 @@ class AextArraySolver : public ArraySolver
       PARENT_LISTED,
       READ_LISTED,
       INDEX_READ_LISTED,
+      INDEX_STORE_LISTED,
       /**
        * the lists of class d_a were appended to those of class d_b, as many
        * of each as d_undoMoves.back() says
@@ -496,18 +511,21 @@ class AextArraySolver : public ArraySolver
   struct UndoCounters
   {
     size_t d_selects, d_stores, d_merges;
-    size_t d_listSelects, d_listStores, d_listConstArrays, d_listMerges;
+    size_t d_listSelects, d_listStores, d_listConstArrays, d_listMerges,
+        d_listDisequalities;
   };
   /** The lengths of the lists a LISTS_MOVED record moved. */
   struct UndoMove
   {
-    size_t d_stores, d_constArrays, d_parents, d_reads, d_indexReads;
+    size_t d_stores, d_constArrays, d_parents, d_reads, d_indexReads,
+        d_indexStores;
   };
   /**
    * The terms of a class that propagation looks at, so that it need not walk
    * the class. For an array class: its STOREs, its STORE_ALLs, the STOREs
    * whose base is in it, and the registered reads whose array is in it. For
-   * an index class: the registered reads whose index is in it.
+   * an index class: the registered reads and the STOREs whose index is in
+   * it.
    */
   struct ClassLists
   {
@@ -516,6 +534,7 @@ class AextArraySolver : public ArraySolver
     std::vector<TNode> d_parents;
     std::vector<TNode> d_reads;
     std::vector<TNode> d_indexReads;
+    std::vector<TNode> d_indexStores;
   };
   /**
    * The lists of each class, keyed on its representative. Kept up to date by
@@ -527,7 +546,10 @@ class AextArraySolver : public ArraySolver
   const ClassLists& classListsOf(TNode rep) const;
   /** Append term to list `which` of the class of rep. */
   void addToClassList(TNode rep, UndoRecord::Kind which, TNode term);
-  /** Apply the registrations and merges since the last update. */
+  /**
+   * Apply the registrations, merges and disequalities since the last update,
+   * and queue in d_ri2Todo the RIntro2 instances they touch.
+   */
   void updateClassLists();
   /** Move records of the LISTS_MOVED records in d_undoLog, in order. */
   std::vector<UndoMove> d_undoMoves;
@@ -536,6 +558,7 @@ class AextArraySolver : public ArraySolver
   size_t d_listStoresDone = 0;
   size_t d_listConstArraysDone = 0;
   size_t d_listMergesDone = 0;
+  size_t d_listDisequalitiesDone = 0;
   /** Add read select as the entry of slot (arrayRep, indexRep). */
   void addSlot(TNode arrayRep, TNode indexRep, TNode select);
   /** Remove the entry of slot (arrayRep, indexRep), which must exist. */
@@ -559,6 +582,8 @@ class AextArraySolver : public ArraySolver
   context::CDList<Node> d_mergeQueue;
   /** How many of d_mergeQueue the propagation state accounts for. */
   size_t d_numMergesDone = 0;
+  /** Every disequality asserted to the equality engine, in order. */
+  context::CDList<std::pair<Node, Node>> d_disequalityQueue;
   /** How many of d_selects the propagation state has walked. */
   size_t d_numSelectsDone = 0;
   /** How many of d_stores the propagation state accounts for. */

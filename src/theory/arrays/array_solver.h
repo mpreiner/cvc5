@@ -110,6 +110,11 @@ class ArraySolver : protected EnvObj
   virtual void eqNotifyMergeNonArray(CVC5_UNUSED TNode a, CVC5_UNUSED TNode b)
   {
   }
+  /**
+   * Callback for when a disequality between a and b is asserted to the
+   * equality engine. Called from TheoryArrays::NotifyClass::eqNotifyDisequal.
+   */
+  virtual void eqNotifyDisequal(CVC5_UNUSED TNode a, CVC5_UNUSED TNode b) {}
   //--------------------------------- end equality engine callbacks
 
   //--------------------------------- standard check
