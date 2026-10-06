@@ -315,6 +315,20 @@ class AextArraySolver : public ArraySolver
   /** State of the last check that sent index splits on the current path. */
   context::CDO<CheckState> d_lastSplitState;
   /**
+   * Whether check() runs at standard effort, or waits for full effort (see
+   * check()). It waits once a select, store or constant array over
+   * bit-vectors or floating-point, as index or element sort, has been
+   * registered. This is on the user context: popping the user level such an
+   * array was registered at checks at standard effort again. It is not on
+   * the SAT context, because it is about what the input holds rather than
+   * the current assignment. It is one setting for all arrays, so an input
+   * that mixes such arrays with others checks all of them at full effort
+   * only.
+   */
+  context::CDO<bool> d_checkAtStandardEffort;
+  /** Clear d_checkAtStandardEffort if arrays of arrayType call for it. */
+  void notifyArrayType(TypeNode arrayType);
+  /**
    * Send a split lemma for every pair of pendingIndexPairs that the care
    * graph cannot handle, unless that was already done in state.
    */

@@ -41,6 +41,7 @@ AextArraySolver::AextArraySolver(Env& env,
       d_incrementalJoins(context()),
       d_lastCheckState(context()),
       d_lastSplitState(context()),
+      d_checkAtStandardEffort(userContext(), true),
       d_selects(context()),
       d_stores(context()),
       d_constArrays(context()),
@@ -97,9 +98,42 @@ std::string AextArraySolver::identify() const { return "AextArraySolver"; }
 // TERM REGISTRATION
 /////////////////////////////////////////////////////////////////////////////
 
+namespace {
+
+/**
+ * Whether arrays of type t index or hold bit-vectors or floating-point
+ * values, directly or through nested arrays.
+ */
+bool isOverBitVectorsOrFloatingPoint(TypeNode t)
+{
+  while (t.isArray())
+  {
+    TypeNode index = t.getArrayIndexType();
+    if (index.isBitVector() || index.isFloatingPoint()
+        || isOverBitVectorsOrFloatingPoint(index))
+    {
+      return true;
+    }
+    t = t.getArrayConstituentType();
+  }
+  return t.isBitVector() || t.isFloatingPoint();
+}
+
+}  // namespace
+
+void AextArraySolver::notifyArrayType(TypeNode arrayType)
+{
+  if (d_checkAtStandardEffort.get()
+      && isOverBitVectorsOrFloatingPoint(arrayType))
+  {
+    d_checkAtStandardEffort = false;
+  }
+}
+
 void AextArraySolver::preRegisterSelect(TNode node)
 {
   Assert(node.getKind() == Kind::SELECT);
+  notifyArrayType(node[0].getType());
   d_selectOrder[node] = d_selects.size();
   d_selects.push_back(node);
 }
@@ -107,6 +141,7 @@ void AextArraySolver::preRegisterSelect(TNode node)
 void AextArraySolver::preRegisterStore(TNode node)
 {
   Assert(node.getKind() == Kind::STORE);
+  notifyArrayType(node.getType());
   d_stores.push_back(node);
 
   // InitW: create virtual read select(store(a, i, v), i) and assert RIntro1.
@@ -133,6 +168,7 @@ void AextArraySolver::preRegisterStoreAll(TNode node)
 {
   // The shared code in TheoryArrays already sets d_defValues; AEXT only needs
   // to know which class the constant array is in (see updateClassLists).
+  notifyArrayType(node.getType());
   d_constArrays.push_back(node);
 }
 
@@ -237,11 +273,31 @@ void AextArraySolver::check(Theory::Effort level)
   // only applies what changed since the previous one (see applyDelta).
   //
   // Index splits are the exception; see the loop that sends them.
+  //
+  // So is everything once an array over bit-vectors or floating-point is
+  // registered: the check then waits for full effort (see
+  // d_checkAtStandardEffort). The bit-vector solver refutes most
+  // assignments at full effort, before this check even gets to run, so most
+  // of what a standard effort check derives is about assignments that are
+  // refuted anyway. It still costs: every lemma registers atoms for the
+  // bit-blaster and enlarges the search, and the same lemmas are derived
+  // again after every backtrack. On QF_ABV/dwp_formulas
+  // try3_sameret_functions_dwp_sha512sum.sha512_init_ctx, solved in 1s with
+  // 3 checks and 4 CongR lemmas at full effort, checking at standard effort
+  // sent 1,009 CongR lemmas in the first 15s and timed out at 1200s. On a
+  // QF_ABVFP KLEE query that needs 115 in total, it sent 13,506 in the first
+  // 15s, 97% of them again after a backtrack had cleared the lemma cache.
+  // QF_ABV/platania is the one family that gains from standard effort (+23
+  // solved at 1200s), and that does not make up for the rest.
   if (d_state.isInConflict())
   {
     return;
   }
   bool fullEffort = Theory::fullEffort(level);
+  if (!fullEffort && !d_checkAtStandardEffort.get())
+  {
+    return;
+  }
 
   // Take the propagation state back to what the last check that completed on
   // the current context path left. Whatever was recorded after that belongs
